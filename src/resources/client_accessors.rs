@@ -7,6 +7,7 @@ use crate::models::message::MessageCreate;
 use crate::models::page::{ListOptions, Page};
 use crate::models::peer::{PeerCreate};
 use crate::models::session::{SessionCreate};
+use crate::resources::conclusions::Conclusions;
 use crate::resources::peer::Peer;
 use crate::resources::session::Session;
 
@@ -65,6 +66,11 @@ impl Honcho {
             size: page.size,
             pages: page.pages,
         })
+    }
+
+    /// Access the workspace-level Conclusions API.
+    pub fn conclusions(&self) -> Conclusions {
+        Conclusions::new(self.clone())
     }
 
     /// Search across all content in the workspace.

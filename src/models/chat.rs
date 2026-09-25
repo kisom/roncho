@@ -3,6 +3,8 @@ use std::pin::Pin;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 
+use crate::models::conclusions::Conclusion;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub content: Option<String>,
@@ -19,7 +21,7 @@ impl ChatResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
     #[serde(default)]
-    pub conclusions: Vec<EvidenceConclusion>,
+    pub conclusions: Vec<Conclusion>,
     #[serde(default)]
     pub messages: Vec<EvidenceMessageRef>,
     #[serde(default)]
@@ -27,25 +29,6 @@ pub struct Evidence {
     #[serde(rename = "reasoning_trace_id")]
     #[serde(default)]
     pub reasoning_trace_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvidenceConclusion {
-    pub id: String,
-    pub level: String,
-    pub content: String,
-    #[serde(rename = "created_at")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    #[serde(rename = "session_id")]
-    #[serde(default)]
-    pub session_id: Option<String>,
-    #[serde(rename = "observer_id")]
-    pub observer_id: String,
-    #[serde(rename = "observed_id")]
-    pub observed_id: String,
-    #[serde(rename = "source_ids")]
-    #[serde(default)]
-    pub source_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

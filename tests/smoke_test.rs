@@ -1,3 +1,4 @@
+#[path = "conclusions_test.rs"] mod conclusions_test;
 #[path = "client_test.rs"] mod client_test;
 #[path = "context_test.rs"] mod context_test;
 #[path = "error_test.rs"] mod error_test;

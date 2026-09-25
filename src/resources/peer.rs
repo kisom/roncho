@@ -170,20 +170,17 @@ impl Peer {
         self.client.post_json(&path, &body).await
     }
 
-    /// Get conclusions about this peer.
-    pub fn conclusions(&self) -> Conclusions {
-        Conclusions {
-            peer: self.clone(),
-            target: None,
-        }
-    }
-
-    /// Get conclusions about another peer, from this peer's perspective.
-    pub fn conclusions_of(&self, target: impl Into<String>) -> Conclusions {
-        Conclusions {
-            peer: self.clone(),
-            target: Some(target.into()),
-        }
+    /// Access conclusions about this peer. List and query results are filtered
+    /// to conclusions where this peer is the observed peer.
+    pub fn conclusions(&self) -> crate::resources::conclusions::Conclusions {
+        let filters = serde_json::json!({ "observed_id": self.id })
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        crate::resources::conclusions::Conclusions::with_filters(
+            self.client.clone(),
+            filters,
+        )
     }
 }
 
@@ -204,35 +201,6 @@ impl Default for PeerContextOptions {
             include_most_frequent: None,
             max_conclusions: None,
         }
-    }
-}
-
-/// Accessor for querying conclusions about a peer.
-pub struct Conclusions {
-    peer: Peer,
-    target: Option<String>,
-}
-
-impl Conclusions {
-    pub async fn list(&self, _opts: &ListOptions) -> Result<Page<crate::models::chat::EvidenceConclusion>, Error> {
-        let params: Vec<(&str, String)> = vec![
-            ("target", self.target.clone().unwrap_or_else(|| self.peer.id.clone())),
-        ];
-        let path = format!("peers/{}/conclusions", self.peer.id);
-        self.peer.client.get_json(&path, &params).await
-    }
-
-    pub async fn query(&self, query: impl Into<String>) -> Result<Page<crate::models::chat::EvidenceConclusion>, Error> {
-        let target = self.target.clone().unwrap_or_else(|| self.peer.id.clone());
-        let body = serde_json::json!({ "query": query.into(), "target": target });
-        let path = format!("peers/{}/conclusions/query", self.peer.id);
-        self.peer.client.post_json(&path, &body).await
-    }
-
-    pub async fn delete(&self, conclusion_id: &str) -> Result<(), Error> {
-        let path = format!("peers/{}/conclusions/{}", self.peer.id, conclusion_id);
-        self.peer.client.delete_json::<serde_json::Value>(&path).await?;
-        Ok(())
     }
 }
 

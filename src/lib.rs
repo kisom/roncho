@@ -7,13 +7,18 @@ pub mod resources;
 pub use client::Honcho;
 pub use client::HonchoBuilder;
 pub use error::Error;
+pub use resources::conclusions::Conclusions;
 pub use resources::peer::Peer;
 pub use resources::session::Session;
 pub use resources::session::SessionContextRequest;
 
 pub use models::chat::{
-    ChatResponse, DialecticOptions, Evidence, EvidenceConclusion, EvidenceMessageRef,
+    ChatResponse, DialecticOptions, Evidence, EvidenceMessageRef,
     EvidenceToolCall, ReasoningLevel, StreamChunk,
+};
+pub use models::conclusions::{
+    Conclusion, ConclusionBatchCreate, ConclusionCreate, ConclusionListOptions,
+    ConclusionQuery, Level,
 };
 pub use models::context::{
     AnthropicMessage, OpenAIMessage, PeerContext, SessionContext, Summary,

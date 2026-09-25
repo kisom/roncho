@@ -137,6 +137,34 @@ impl Honcho {
         resp.json::<T>().await.map_err(|e| Error::Decode(e.to_string()))
     }
 
+    pub(crate) async fn post_json_query<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<T, Error> {
+        let url = self.url(path)?;
+        let headers = self.headers()?;
+
+        let resp = self
+            .http
+            .post(url)
+            .headers(headers)
+            .query(query)
+            .json(body)
+            .timeout(self.timeout)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(parse_api_error(status, &text));
+        }
+
+        resp.json::<T>().await.map_err(|e| Error::Decode(e.to_string()))
+    }
+
     pub(crate) async fn delete_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
