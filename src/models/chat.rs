@@ -52,7 +52,7 @@ pub struct EvidenceObservation {
     pub observed_id: String,
     #[serde(default)]
     pub session_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::models::conclusions::null_vec")]
     pub source_ids: Vec<String>,
 }
 
@@ -106,3 +106,15 @@ pub struct StreamChunk {
 }
 
 pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
+
+#[cfg(test)]
+mod evidence_null_tests {
+    use super::EvidenceObservation;
+
+    #[test]
+    fn null_source_ids_decode() {
+        let raw = r#"{"id":"c","level":"explicit","content":"fact","created_at":"2024-01-01T00:00:00Z","observer_id":"a","observed_id":"b","source_ids":null}"#;
+        let row: EvidenceObservation = serde_json::from_str(raw).unwrap();
+        assert!(row.source_ids.is_empty());
+    }
+}

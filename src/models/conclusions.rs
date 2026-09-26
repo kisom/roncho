@@ -15,7 +15,14 @@ fn default_times_derived() -> u64 {
     1
 }
 
-fn null_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+fn null_times_derived<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(1))
+}
+
+pub(crate) fn null_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: serde::Deserialize<'de>,
@@ -39,10 +46,27 @@ pub struct Conclusion {
     pub level: Level,
     #[serde(rename = "source_ids", default, deserialize_with = "null_vec")]
     pub source_ids: Vec<String>,
-    #[serde(rename = "times_derived", default = "default_times_derived")]
+    #[serde(
+        rename = "times_derived",
+        default = "default_times_derived",
+        deserialize_with = "null_times_derived"
+    )]
     pub times_derived: u64,
     #[serde(rename = "created_at")]
     pub created_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Conclusion;
+
+    #[test]
+    fn null_source_ids_and_times_derived_decode() {
+        let raw = r#"{"id":"c","content":"fact","observer_id":"a","observed_id":"b","session_id":"s","level":"explicit","source_ids":null,"times_derived":null,"created_at":"2024-01-01T00:00:00Z"}"#;
+        let conclusion: Conclusion = serde_json::from_str(raw).unwrap();
+        assert!(conclusion.source_ids.is_empty());
+        assert_eq!(conclusion.times_derived, 1);
+    }
 }
 
 /// Create a single conclusion.

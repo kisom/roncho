@@ -160,6 +160,9 @@ impl Client {
     }
 
     /// `POST /v3/workspaces/{workspace}/conclusions/query`.
+    ///
+    /// On rift, `filters` must name the observer and the observed peer
+    /// (`observer_id`/`observed_id`, or `observer`/`observed`). Omitting them is a 422.
     pub fn query_conclusions(&self, query: &ConclusionQuery) -> Result<Vec<Conclusion>, Error> {
         self.call(
             "POST",
@@ -175,13 +178,13 @@ impl Client {
         self.call_ignore("DELETE", &path, None, None)
     }
 
-    /// `POST /v3/workspaces/{workspace}/search`. Body is `{"query","limit"?}`.
+    /// `POST /v3/workspaces/{workspace}/search`. Body is `{"query","limit"?,"scope"?}`.
     pub fn search_workspace(&self, search: &MessageSearch) -> Result<Vec<Message>, Error> {
         self.call(
             "POST",
             &self.scoped("search"),
             None,
-            Some(search_body(search)),
+            Some(search_body(search, true)),
         )
     }
 
@@ -192,7 +195,7 @@ impl Client {
         search: &MessageSearch,
     ) -> Result<Vec<Message>, Error> {
         let path = self.scoped(&format!("peers/{}/search", enc(peer_id)?));
-        self.call("POST", &path, None, Some(search_body(search)))
+        self.call("POST", &path, None, Some(search_body(search, false)))
     }
 
     /// `POST /v3/workspaces/{workspace}/sessions/{session}/search`.
@@ -202,7 +205,7 @@ impl Client {
         search: &MessageSearch,
     ) -> Result<Vec<Message>, Error> {
         let path = self.scoped(&format!("sessions/{}/search", enc(session_id)?));
-        self.call("POST", &path, None, Some(search_body(search)))
+        self.call("POST", &path, None, Some(search_body(search, false)))
     }
 
     /// `POST /v3/workspaces/{workspace}/peers/{peer}/chat` with `stream: true`.
@@ -558,7 +561,7 @@ fn list_query(opts: &ListOptions) -> Vec<(&str, String)> {
     query
 }
 
-fn search_body(search: &MessageSearch) -> Value {
+fn search_body(search: &MessageSearch, include_scope: bool) -> Value {
     let mut body = serde_json::Map::new();
     body.insert("query".into(), json!(search.query));
     if let Some(limit) = search.limit {
@@ -566,6 +569,11 @@ fn search_body(search: &MessageSearch) -> Value {
     }
     if let Some(filters) = &search.filters {
         body.insert("filters".into(), Value::Object(filters.clone()));
+    }
+    if include_scope {
+        if let Some(scope) = &search.scope {
+            body.insert("scope".into(), json!(scope));
+        }
     }
     Value::Object(body)
 }
