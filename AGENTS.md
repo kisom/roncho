@@ -53,7 +53,7 @@ Design philosophy: models are data-only; resources are client-bound runtime obje
 
 ## Scope
 
-`roncho::blocking::Client` is the API that 1.0.0 will freeze. New work lands there first. The async `Honcho` client follows those shapes and may keep its environment fallback and `https://api.honcho.dev` default.
+`roncho::blocking::Client` is frozen as of 1.0.0. New work lands there first. The async `Honcho` client follows those shapes and may keep its environment fallback and `https://api.honcho.dev` default.
 
 In scope now, on the blocking client: peers, sessions, messages, conclusions, search, chat (including streaming), queue status, workspaces, scopes, file upload, and dreaming. The async client also has peer cards, peer context, and session context.
 

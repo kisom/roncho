@@ -4,7 +4,7 @@ A native Rust SDK for [Honcho](https://honcho.dev) — the persistent, reasoning
 
 `roncho` gives your agent a memory of the people and projects it works with: it remembers facts about peers across sessions, recalls past conversations, and answers questions about what it already knows. This crate is an idiomatic Rust binding to Honcho's HTTP API (v3).
 
-> **Status:** pre-1.0, actively under development. The public surface is still settling and the API may change between versions.
+> **Status:** 1.0.0. `roncho::blocking::Client` is frozen. The async `Honcho` client is not.
 
 ## Features
 
@@ -21,14 +21,14 @@ A native Rust SDK for [Honcho](https://honcho.dev) — the persistent, reasoning
 
 ```toml
 [dependencies]
-roncho = "0.1.1"
+roncho = "1.0.0"
 ```
 
 A blocking-only build has no async runtime and no default base URL. Timestamps are RFC 3339 strings so that graph does not pull `chrono`, `uuid`, or `url`.
 
 ```toml
 [dependencies]
-roncho = { version = "0.1.1", default-features = false, features = ["blocking"] }
+roncho = { version = "1.0.0", default-features = false, features = ["blocking"] }
 ```
 
 ```rust
@@ -198,6 +198,6 @@ See `AGENTS.md` for project conventions. `docs/compatibility-2026-09-25.md` reco
 
 ## Roadmap
 
-`roncho::blocking::Client` is the surface 1.0.0 will freeze. It now includes scopes, file upload, and dreaming. Webhooks stay out. The async `Honcho` client follows those same operations and keeps the environment fallback and the `https://api.honcho.dev` default.
+`roncho::blocking::Client` is the 1.0.0 public API. It includes scopes, file upload, and dreaming. Webhooks stay out. The async `Honcho` client follows those same operations and keeps the environment fallback and the `https://api.honcho.dev` default.
 
 The CLI and the blocking client read `~/.config/roncho/roncho.toml` (`api_key`, `base_url`, `workspace_id`). A sample with authentication left off is `docs/roncho.toml.example`. The blocking builder uses that file only for fields you did not set.
