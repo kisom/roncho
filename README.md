@@ -19,18 +19,16 @@ A native Rust SDK for [Honcho](https://honcho.dev) — the persistent, reasoning
 
 ## Installation
 
-The crate is not yet published to crates.io. For now, depend on it via git:
-
 ```toml
 [dependencies]
-roncho = { git = "https://git.wntrmute.dev/kyle/roncho" }
+roncho = "0.1.0"
 ```
 
-Boxmaker's `memoryd` uses the blocking client only. That build has no async runtime and no default base URL. Timestamps are RFC 3339 strings so the blocking graph does not pull `chrono`, `uuid`, or `url`.
+A blocking-only build has no async runtime and no default base URL. Timestamps are RFC 3339 strings so that graph does not pull `chrono`, `uuid`, or `url`.
 
 ```toml
 [dependencies]
-roncho = { git = "https://git.wntrmute.dev/kyle/roncho", default-features = false, features = ["blocking"] }
+roncho = { version = "0.1.0", default-features = false, features = ["blocking"] }
 ```
 
 ```rust
@@ -43,7 +41,7 @@ let client = Client::builder()
     .build()?;
 ```
 
-The API key is optional. When it is set it is sent as `Authorization: Bearer` and it is omitted from `Debug`. The client reads no environment variables and does not follow redirects. `https://` needs the `tls` feature (`rustls` 0.23 with the `ring` provider and the platform certificate store). See `CHANGELOG.md` and `docs/rift-2026-09-25.md`.
+The API key is optional. When it is set it is sent as `Authorization: Bearer` and it is omitted from `Debug`. The client reads no environment variables and does not follow redirects. `https://` needs the `tls` feature (`rustls` 0.23 with the `ring` provider and the platform certificate store). See `CHANGELOG.md` and `docs/compatibility-2026-09-25.md`.
 
 ## Configuration
 

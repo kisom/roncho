@@ -91,6 +91,11 @@ fn key_is_optional_and_absent_from_debug() {
         .read_timeout(Duration::from_secs(2))
         .build()
         .unwrap();
+    let builder = Client::builder().api_key("super-secret");
+    assert!(
+        !format!("{builder:?}").contains("super-secret"),
+        "builder debug included the key: {builder:?}"
+    );
     let rendered = format!("{client:?}");
     assert!(!rendered.contains("super-secret"));
     assert!(rendered.contains("api_key_present"));
@@ -124,12 +129,16 @@ fn peer_session_messages_and_search() {
     let peer = r#"{"id":"p","workspace_id":"box","created_at":"2024-01-01T00:00:00Z","metadata":{},"configuration":{}}"#;
     let (port, rx) = serve(json_ok(peer));
     client_at(port).peer(&PeerCreate::new("p")).unwrap();
-    assert!(request_text(rx).starts_with("POST /v3/workspaces/box/peers HTTP/1.1"));
+    let raw = request_text(rx);
+    assert!(raw.starts_with("POST /v3/workspaces/box/peers HTTP/1.1"));
+    assert!(raw.contains(r#""id":"p""#));
 
     let session = r#"{"id":"s","is_active":true,"workspace_id":"box","created_at":"2024-01-01T00:00:00Z","metadata":{},"configuration":{}}"#;
     let (port, rx) = serve(json_ok(session));
     client_at(port).session(&SessionCreate::new("s")).unwrap();
-    assert!(request_text(rx).contains("POST /v3/workspaces/box/sessions "));
+    let raw = request_text(rx);
+    assert!(raw.contains("POST /v3/workspaces/box/sessions "));
+    assert!(raw.contains(r#""id":"s""#));
 
     let msg = r#"[{"id":"m","content":"hi","peer_id":"p","session_id":"s","workspace_id":"box","created_at":"2024-01-01T00:00:00Z","token_count":1,"metadata":{}}]"#;
     let (port, rx) = serve(json_ok(msg));
@@ -137,7 +146,11 @@ fn peer_session_messages_and_search() {
         .add_messages("s", &[MessageCreate::new("hi", "p")])
         .unwrap();
     assert_eq!(created[0].content, "hi");
-    assert!(request_text(rx).contains("/sessions/s/messages "));
+    let raw = request_text(rx);
+    assert!(raw.contains("/sessions/s/messages "));
+    assert!(raw.contains(r#""content":"hi""#));
+    assert!(raw.contains(r#""peer_id":"p""#));
+    assert!(raw.contains(r#""messages""#));
 
     let page = r#"{"items":[],"total":0,"page":2,"size":10,"pages":0}"#;
     let (port, rx) = serve(json_ok(page));
@@ -161,22 +174,31 @@ fn peer_session_messages_and_search() {
 
     let (port, rx) = serve(json_ok(found));
     client_at(port).search_peer("p", &search).unwrap();
-    assert!(request_text(rx).contains("/peers/p/search "));
+    let raw = request_text(rx);
+    assert!(raw.contains("/peers/p/search "));
+    assert!(raw.contains(r#""query":"hi""#));
+    assert!(raw.contains(r#""limit":5"#));
 
     let (port, rx) = serve(json_ok(found));
     client_at(port).search_session("s", &search).unwrap();
-    assert!(request_text(rx).contains("/sessions/s/search "));
+    let raw = request_text(rx);
+    assert!(raw.contains("/sessions/s/search "));
+    assert!(raw.contains(r#""query":"hi""#));
 }
 
 #[test]
 fn conclusions_chat_and_deletes() {
     let concl = r#"[{"id":"c","content":"fact","observer_id":"p","observed_id":"q","created_at":"2024-01-01T00:00:00Z"}]"#;
-    let (port, _) = serve(json_ok(concl));
+    let (port, rx) = serve(json_ok(concl));
     let batch = ConclusionBatchCreate {
         conclusions: vec![ConclusionCreate::new("fact", "p", "q")],
     };
     let made = client_at(port).create_conclusions(&batch).unwrap();
     assert_eq!(made[0].id, "c");
+    let raw = request_text(rx);
+    assert!(raw.contains(r#""content":"fact""#));
+    assert!(raw.contains(r#""observer_id":"p""#));
+    assert!(raw.contains(r#""observed_id":"q""#));
 
     let page = r#"{"items":[],"total":0,"page":1,"size":50,"pages":0}"#;
     let (port, _) = serve(json_ok(page));
@@ -212,15 +234,21 @@ fn conclusions_chat_and_deletes() {
     let raw = request_text(rx);
     assert!(raw.contains("POST /v3/workspaces/box/peers/p/chat "));
     assert!(raw.contains(r#""reasoning_level":"low""#));
+    assert!(raw.contains(r#""query":""#));
+    assert!(!raw.contains(r#""stream":true"#));
     assert!(!raw.contains("\"reasoning_level\":null"));
 
-    let (port, _) = serve(json_ok(chat));
+    let (port, rx) = serve(json_ok(chat));
     client_at(port)
         .workspace_chat(&DialecticOptions {
             query: "q".into(),
             ..DialecticOptions::default()
         })
         .unwrap();
+    let raw = request_text(rx);
+    assert!(raw.contains(r#""query":"q""#));
+    assert!(!raw.contains("target"));
+    assert!(!raw.contains("filters"));
 }
 
 #[test]
@@ -302,6 +330,7 @@ fn chunk(data: &str) -> Vec<u8> {
 fn chat_stream_reassembles_events_and_times_out_between_them() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let (mut sock, _) = listener.accept().unwrap();
         sock.set_nodelay(true).unwrap();
@@ -317,6 +346,7 @@ fn chat_stream_reassembles_events_and_times_out_between_them() {
                 break;
             }
         }
+        let _ = tx.send(buf);
         let head = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
         sock.write_all(head).unwrap();
         sock.write_all(&chunk("data: {\"delta\":{\"content\":\"Hel"))
@@ -328,7 +358,7 @@ fn chat_stream_reassembles_events_and_times_out_between_them() {
         sock.write_all(b"0\r\n\r\n").unwrap();
     });
     let client = client_at(port);
-    let mut events: Vec<_> = client
+    let stream = client
         .peer_chat_stream(
             "p",
             &DialecticOptions {
@@ -336,9 +366,13 @@ fn chat_stream_reassembles_events_and_times_out_between_them() {
                 ..DialecticOptions::default()
             },
         )
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
         .unwrap();
+    let request = String::from_utf8(rx.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
+    assert!(
+        request.contains(r#""stream":true"#),
+        "stream request omitted stream:true: {request}"
+    );
+    let mut events: Vec<_> = stream.collect::<Result<Vec<_>, _>>().unwrap();
     assert_eq!(events[0].content, "Hello");
     assert!(events.last().unwrap().done);
     let _ = events.pop();
@@ -380,15 +414,83 @@ fn chat_stream_reassembles_events_and_times_out_between_them() {
     assert!(matches!(err, roncho::blocking::Error::Timeout));
 }
 
-/// Live checks against the owner's Honcho on rift. Ignored unless run by name.
+#[test]
+fn chat_stream_rejects_plain_json_and_rejoins_utf8() {
+    let (port, _) = serve(json_ok(r#"{"content":"yes"}"#));
+    let err = client_at(port)
+        .peer_chat_stream(
+            "p",
+            &DialecticOptions {
+                query: "q".into(),
+                ..DialecticOptions::default()
+            },
+        )
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(err, roncho::blocking::Error::Stream(_)), "{err}");
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        sock.set_nodelay(true).unwrap();
+        let mut tmp = [0u8; 2048];
+        let mut buf = Vec::new();
+        loop {
+            let n = sock.read(&mut tmp).unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+        sock.write_all(head).unwrap();
+        let mut first = b"data: {\"delta\":{\"content\":\"caf".to_vec();
+        first.push(0xC3);
+        sock.write_all(&chunk_bytes(&first)).unwrap();
+        sock.flush().unwrap();
+        thread::sleep(Duration::from_millis(40));
+        let mut second = vec![0xA9];
+        second.extend_from_slice(b"\"},\"done\":false}\n\n");
+        sock.write_all(&chunk_bytes(&second)).unwrap();
+        sock.write_all(&chunk_bytes(b"data: {\"done\":true}\n\n"))
+            .unwrap();
+        sock.write_all(b"0\r\n\r\n").unwrap();
+    });
+    let text: String = client_at(port)
+        .peer_chat_stream(
+            "p",
+            &DialecticOptions {
+                query: "q".into(),
+                ..DialecticOptions::default()
+            },
+        )
+        .unwrap()
+        .map(|item| item.unwrap())
+        .map(|chunk| chunk.content)
+        .collect();
+    assert_eq!(text, "caf\u{e9}");
+}
+
+fn chunk_bytes(data: &[u8]) -> Vec<u8> {
+    let mut out = format!("{:x}\r\n", data.len()).into_bytes();
+    out.extend_from_slice(data);
+    out.extend_from_slice(b"\r\n");
+    out
+}
+
+/// Live checks against `RONCHO_LIVE_URL`. Ignored unless run by name.
 /// Writes only to a throwaway workspace and deletes it.
 #[test]
 #[ignore]
-fn live_rift_throwaway_workspace() {
-    let Ok(base) = std::env::var("RONCHO_LIVE_URL") else {
-        eprintln!("set RONCHO_LIVE_URL to run the live suite");
-        return;
-    };
+fn live_server_throwaway_workspace() {
+    let base = std::env::var("RONCHO_LIVE_URL")
+        .expect("set RONCHO_LIVE_URL to the server this suite should call");
     let workspace = format!("roncho-test-{}", std::process::id());
     let client = Client::builder()
         .base_url(base)
@@ -441,7 +543,7 @@ fn live_rift_throwaway_workspace() {
     let messages = client
         .add_messages(
             "s",
-            &[MessageCreate::new("rift ping", "owner").with_created_at("2024-01-01T00:00:00Z")],
+            &[MessageCreate::new("hello ping", "owner").with_created_at("2024-01-01T00:00:00Z")],
         )
         .expect("messages");
     println!("MESSAGE {}", messages[0].id);
@@ -451,7 +553,7 @@ fn live_rift_throwaway_workspace() {
         .expect("list");
     println!("LIST {} items", page.items.len());
 
-    let mut search = MessageSearch::new("rift");
+    let mut search = MessageSearch::new("hello");
     search.limit = Some(5);
     let found = client.search_workspace(&search).expect("search");
     println!("SEARCH {}", found.len());
@@ -461,11 +563,11 @@ fn live_rift_throwaway_workspace() {
     println!("SESSION_SEARCH {}", session_hits.len());
 
     let batch = ConclusionBatchCreate {
-        conclusions: vec![ConclusionCreate::new("rift fact", "owner", "owner")],
+        conclusions: vec![ConclusionCreate::new("noted fact", "owner", "owner")],
     };
     let made = client.create_conclusions(&batch).expect("conclusion");
     println!("CONCLUSION {}", made[0].id);
-    let mut query = ConclusionQuery::new("rift fact");
+    let mut query = ConclusionQuery::new("noted fact");
     query.filters = Some(
         serde_json::json!({"observer_id": "owner", "observed_id": "owner"})
             .as_object()

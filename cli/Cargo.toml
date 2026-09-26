@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 description = "Command-line interface for the Honcho memory platform"
 license = "Apache-2.0"
-repository = "https://git.wntrmute.dev/kyle/roncho"
 
 [[bin]]
 name = "roncho"

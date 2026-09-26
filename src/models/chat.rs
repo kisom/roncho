@@ -1,6 +1,3 @@
-use std::pin::Pin;
-
-use futures::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::models::conclusions::Level;
@@ -104,8 +101,6 @@ pub struct StreamChunk {
     pub done: bool,
     pub evidence: Option<Evidence>,
 }
-
-pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
 
 #[cfg(test)]
 mod evidence_null_tests {

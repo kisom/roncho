@@ -14,8 +14,11 @@ pub struct ChatStream {
     body: Option<LiveBody>,
     parser: SseParser,
     pending: VecDeque<StreamChunk>,
+    /// Bytes of a UTF-8 character that arrived split across reads.
+    utf8: Vec<u8>,
     finished: bool,
     saw_done: bool,
+    produced: bool,
 }
 
 impl ChatStream {
@@ -24,8 +27,10 @@ impl ChatStream {
             body: Some(body),
             parser: SseParser::new(),
             pending: VecDeque::new(),
+            utf8: Vec::new(),
             finished: false,
             saw_done: false,
+            produced: false,
         }
     }
 }
@@ -39,6 +44,7 @@ impl Iterator for ChatStream {
                 if chunk.done {
                     self.saw_done = true;
                 }
+                self.produced = true;
                 return Some(Ok(chunk));
             }
             if self.finished || self.saw_done {
@@ -49,20 +55,35 @@ impl Iterator for ChatStream {
                 return None;
             };
             match body.read_some() {
-                Ok(Some(bytes)) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    match self.parser.push(&text) {
+                Ok(Some(bytes)) => match take_utf8(&mut self.utf8, &bytes) {
+                    Ok(text) => match self.parser.push(&text) {
                         Ok(chunks) => self.pending.extend(chunks),
                         Err(err) => {
                             self.finished = true;
                             return Some(Err(Error::Stream(err)));
                         }
+                    },
+                    Err(err) => {
+                        self.finished = true;
+                        return Some(Err(err));
                     }
-                }
+                },
                 Ok(None) => {
                     self.finished = true;
+                    if !self.utf8.is_empty() {
+                        return Some(Err(Error::Stream(
+                            "response ended inside a UTF-8 character".into(),
+                        )));
+                    }
                     match self.parser.finish() {
-                        Ok(chunks) => self.pending.extend(chunks),
+                        Ok(chunks) => {
+                            if chunks.is_empty() && !self.produced {
+                                return Some(Err(Error::Stream(
+                                    "chat response was not a text/event-stream".into(),
+                                )));
+                            }
+                            self.pending.extend(chunks);
+                        }
                         Err(err) => return Some(Err(Error::Stream(err))),
                     }
                 }
@@ -83,6 +104,30 @@ impl Iterator for ChatStream {
                     return Some(Err(err));
                 }
             }
+        }
+    }
+}
+
+/// Append `bytes`, returning the complete UTF-8 and keeping a trailing
+/// partial character for the next read.
+fn take_utf8(carry: &mut Vec<u8>, bytes: &[u8]) -> Result<String, Error> {
+    carry.extend_from_slice(bytes);
+    match std::str::from_utf8(carry) {
+        Ok(text) => {
+            let owned = text.to_string();
+            carry.clear();
+            Ok(owned)
+        }
+        Err(err) => {
+            let valid = err.valid_up_to();
+            let text = std::str::from_utf8(&carry[..valid])
+                .expect("valid_up_to is a char boundary")
+                .to_string();
+            carry.drain(..valid);
+            if err.error_len().is_some() || carry.len() > 3 {
+                return Err(Error::Stream("response was not valid UTF-8".into()));
+            }
+            Ok(text)
         }
     }
 }

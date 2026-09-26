@@ -161,7 +161,7 @@ impl Client {
 
     /// `POST /v3/workspaces/{workspace}/conclusions/query`.
     ///
-    /// On rift, `filters` must name the observer and the observed peer
+    /// On the self-hosted server checked for 0.1.0, `filters` must name the observer and the observed peer
     /// (`observer_id`/`observed_id`, or `observer`/`observed`). Omitting them is a 422.
     pub fn query_conclusions(&self, query: &ConclusionQuery) -> Result<Vec<Conclusion>, Error> {
         self.call(
@@ -361,7 +361,7 @@ pub struct Probe {
     pub body: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClientBuilder {
     base_url: Option<String>,
     workspace_id: Option<String>,
@@ -369,6 +369,19 @@ pub struct ClientBuilder {
     connect_timeout: Duration,
     read_timeout: Duration,
     max_body: usize,
+}
+
+impl std::fmt::Debug for ClientBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientBuilder")
+            .field("base_url", &self.base_url)
+            .field("workspace_id", &self.workspace_id)
+            .field("api_key_present", &self.api_key.is_some())
+            .field("connect_timeout", &self.connect_timeout)
+            .field("read_timeout", &self.read_timeout)
+            .field("max_body", &self.max_body)
+            .finish()
+    }
 }
 
 impl Default for ClientBuilder {
@@ -589,6 +602,9 @@ fn chat_body(opts: &DialecticOptions, peer: bool) -> Value {
     }
     if let Some(include) = opts.include_evidence {
         body.insert("include_evidence".into(), json!(include));
+    }
+    if let Some(stream) = opts.stream {
+        body.insert("stream".into(), json!(stream));
     }
     if let Some(scope) = &opts.scope {
         let value = match scope {

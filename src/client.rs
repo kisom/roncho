@@ -253,7 +253,7 @@ async fn decode_json<T: serde::de::DeserializeOwned>(resp: reqwest::Response) ->
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(parse_api_error(status, &text));
+        return Err(parse_api_error(status.as_u16(), &text));
     }
     let bytes = resp.bytes().await.map_err(Error::Http)?;
     if bytes.is_empty() {

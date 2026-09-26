@@ -48,7 +48,7 @@ pub(crate) fn open_chat_stream(
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            yield Err(crate::error::parse_api_error(status, &text));
+            yield Err(crate::error::parse_api_error(status.as_u16(), &text));
             return;
         }
 

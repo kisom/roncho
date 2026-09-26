@@ -1,47 +1,47 @@
-# Rift compatibility — 2026-09-25
+# Server compatibility — 2026-09-25
 
-Checked from this machine against `http://rift.scylla-hammerhead.ts.net:8000` with `roncho::blocking::Client`, no `Authorization` header. Writes used workspace `roncho-test-<pid>` and the test deleted the session and then the workspace. `hermes-fleet` and `guardian-star` were not touched.
+Checked on 2026-09-25 against a self-hosted Honcho with `roncho::blocking::Client` and no `Authorization` header. Writes used a throwaway workspace and the test deleted the session and then the workspace.
 
-`GET /health` returned `200 {"status":"ok"}`. The body has no version. The image named in the Boxmaker requirements (`3.2.0-pr1092-7e57fe2`) was not confirmed by the server.
+`GET /health` returned `200 {"status":"ok"}`. The body has no version and no image name.
 
 ## Operations
 
-| # | Call | Result on rift |
+| # | Call | Result |
 |---|---|---|
-| O1 | `POST /v3/workspaces` `{"id"}` | 200, `Workspace` JSON |
-| O2 | `POST /v3/workspaces/{ws}/peers` `{"id":"owner"}` | 200, `Peer` with `id`, `workspace_id`, `created_at` |
-| O3 | `POST .../sessions` with `peers.owner.observe_me/observe_others = false` | 200, `is_active: true` |
-| O4 | `POST .../sessions/s/messages` one message, `created_at` set | 200, array of `Message`, no `role` |
+| O1 | `POST /v3/workspaces` `{"id"}` | 201, `Workspace` JSON. OpenAPI 3.2.1 says 200 |
+| O2 | `POST /v3/workspaces/{ws}/peers` `{"id":"owner"}` | 201, `Peer` with `id`, `workspace_id`, `created_at`. OpenAPI 3.2.1 says 200 |
+| O3 | `POST .../sessions` with `peers.owner.observe_me/observe_others = false` | 201, `is_active: true`. OpenAPI 3.2.1 says 200 |
+| O4 | `POST .../sessions/s/messages` one message, `created_at` set | 201, array of `Message`, no `role` |
 | O5 | `POST .../messages/list?page=1&size=10` | 200, `Page`, the message was on the page |
-| O6 | `DELETE .../sessions/s` | 202, empty body, after which workspace delete succeeded |
+| O6 | `DELETE .../sessions/s` | 202, body `{"message":"Session deleted successfully"}`, after which workspace delete succeeded |
 | O7 | `DELETE /v3/workspaces/{id}` while `s` was active | 409, detail: active session(s) remain, delete sessions first |
-| O8 | `POST .../conclusions` one conclusion | 200, array. `source_ids` was JSON `null` (3.2.1 schema shows an array). Decoded as `[]` |
+| O8 | `POST .../conclusions` one conclusion | 201, array. `source_ids` was JSON `null` (3.2.1 schema shows an array). Decoded as `[]` |
 | O9 | list, query, delete | list not separately printed; query without filters is 422 (below); delete of the new id succeeded |
-| O10 | `POST .../search` `{"query":"rift","limit":5}` | 200, bare array, length 1 |
+| O10 | `POST .../search` `{"query","limit":5}` | 200, bare array, length 1 |
 | O11 | peer and session search, same body | 200, bare array, length 1 each |
-| O12 | `POST .../peers/owner/chat` `reasoning_level: minimal`, `session_id: s`, query about the message | 200, `content` quoted `rift ping`. Finished in a few seconds at `minimal`, not the 30–50 s seen at higher levels |
+| O12 | `POST .../peers/owner/chat` `reasoning_level: minimal`, `session_id` set, query about the message | 200. `content` quoted the message. Finished in a few seconds at `minimal` |
 | O13 | `GET /health` | 200 `{"status":"ok"}`. No version |
 
-Where this disagrees with Honcho OpenAPI 3.2.1, rift wins:
+Where this disagrees with Honcho OpenAPI 3.2.1, the server wins:
 
 - Conclusion `source_ids` may be `null`. 3.2.1 says an array, defaulting to empty for explicit conclusions.
 - `POST .../conclusions/query` requires `filters.observer`/`observer_id` and `filters.observed`/`observed_id`. The 3.2.1 schema marks `filters` optional. The 422 body says both names are accepted.
 
 ## Questions
 
-The documentation answers below start from [the v3 overview](https://honcho.dev/docs/v3/documentation/introduction/overview) and the pages it links. The rift column is what this listener did on 2026-09-25, including the throwaway workspace `roncho-q-20914` (deleted afterward; a later delete returned 404). `hermes-fleet` and `guardian-star` were not read. Where the published docs and rift disagree, the rift result is the one to code against.
+The documentation answers below start from [the v3 overview](https://honcho.dev/docs/v3/documentation/introduction/overview) and the pages it links. The server notes are what this listener did on 2026-09-25, on a throwaway workspace that was deleted afterward (a later delete returned 404). Where the published docs and that server disagree, the server is the one to code against.
 
 ### Q1. Is authentication off, and are keys scoped?
 
 The [architecture page](https://honcho.dev/docs/v3/documentation/core-concepts/architecture) says authentication is issued at the workspace. [`POST /v3/keys`](https://honcho.dev/docs/v3/api-reference/endpoint/keys/create-key) requires an admin key. It returns a real key on Honcho Cloud. On a self-hosted instance it returns an error when `AUTH_USE_AUTH` is disabled. A key must name at least one of `workspace_id`, `peer_id`, or `session_id`, and a peer- or session-scoped key must also carry its workspace. The [dashboard page](https://honcho.dev/docs/v3/documentation/reference/platform) says a peer-scoped key may act on its own peer and has read-only access to sessions that peer is an active member of. It cannot write those sessions or act on other peers. A session-scoped key stays inside that session.
 
-On rift, writes with no `Authorization` header succeeded, and `POST /v3/keys` returned `405 {"detail":"Feature is disabled"}`. That matches a self-hosted server with authentication disabled. Whether this process can turn `AUTH_USE_AUTH` on was not found.
+On that server, writes with no `Authorization` header succeeded, and `POST /v3/keys` returned `405 {"detail":"Feature is disabled"}`. That matches a self-hosted server with authentication disabled. Whether this process can turn `AUTH_USE_AUTH` on was not found.
 
 ### Q2. Can one message be edited or deleted, and what does deleting a session remove?
 
 [`PUT .../messages/{id}`](https://honcho.dev/docs/v3/api-reference/endpoint/messages/update-message) updates metadata only. There is no delete-message route. The [deleting-data page](https://honcho.dev/docs/v3/documentation/features/advanced/deleting-data) says peers and individual messages cannot be deleted. `DELETE` a session returns 202, marks the session inactive immediately, and then removes messages, embeddings, queued reasoning, session-scoped conclusions, and peer associations in the background. That cascade does not show up in queue status, and there is no endpoint that says when it has finished. Explicit conclusions, tied to the session they came from, are deleted with it. Derived conclusions (deductive, inductive, contradiction) have no owning session and survive. Deleting the workspace removes every peer, session, message, conclusion, collection, embedding, webhook, and queued task.
 
-On rift, `PUT` changed `metadata.label` and left `content` alone. `DELETE` of that message returned `405 {"detail":"Method Not Allowed"}`. `DELETE` of the session returned `202 {"message":"Session deleted successfully"}`. The explicit conclusion with `session_id: "s"` was still listed on the next request. The background drain was not waited out.
+On that server, `PUT` changed `metadata.label` and left `content` alone. `DELETE` of that message returned `405 {"detail":"Method Not Allowed"}`. `DELETE` of the session returned `202 {"message":"Session deleted successfully"}`. The explicit conclusion with `session_id: "s"` was still listed on the next request. The background drain was not waited out.
 
 ### Q3. What triggers the deriver, how do you see that a message was processed, and what turns derivation off?
 
@@ -49,30 +49,30 @@ The [overview](https://honcho.dev/docs/v3/documentation/introduction/overview) s
 
 Turning derivation off, from the [reasoning-configuration page](https://honcho.dev/docs/v3/documentation/features/advanced/reasoning-configuration): `observe_me: false` on the peer stops Honcho observing that peer, and a session-level peer config overrides it. `observe_others` controls whether that peer models the others in the session. `reasoning.enabled` may be set on the message, the session, or the workspace. The message wins, then the session, then the workspace. If reasoning is disabled, peer cards and dreams are disabled too.
 
-On rift, two messages in one request left `pending_work_units: 2` and `completed_work_units: 0` in the same second. The peer was created with `observe_me: true`, which the response echoed. The off switches were not tried, and the time until a conclusion appeared was not measured.
+On that server, two messages in one request left `pending_work_units: 2` and `completed_work_units: 0` in the same second. The peer was created with `observe_me: true`, which the response echoed. The off switches were not tried, and the time until a conclusion appeared was not measured.
 
 ### Q4. Can search and chat be filtered by metadata, and what is the grammar?
 
 The [search page](https://honcho.dev/docs/v3/documentation/features/advanced/search) says workspace, session, and peer search take `limit` (default 10, max 100) and `filters`, including `filters.metadata` equality, `filters.session_id`, and `filters.created_at` with `gte` / `lte`. The [filters page](https://honcho.dev/docs/v3/documentation/features/advanced/using-filters) adds `gt`, `lt`, `ne`, `in`, `contains`, and `icontains`, plus `AND`, `OR`, and `NOT`. The same page says chat and representation filters accept only `session_id`: a string, a list, or `{"in":[...]}`. Other keys are rejected. A metadata label therefore excludes a message from search, not from the dialectic, unless you also keep that message out of the sessions the chat is allowed to read.
 
-On rift, `messages/list` and workspace search with `{"filters":{"metadata":{"label":"keep"}}}` each returned only the message carrying that label. The other message contained the same query word and was left out. A metadata filter was not sent to chat.
+On that server, `messages/list` and workspace search with `{"filters":{"metadata":{"label":"keep"}}}` each returned only the message carrying that label. The other message contained the same query word and was left out. A metadata filter was not sent to chat.
 
 ### Q5. What does `source_ids` refer to, and can a conclusion be traced to messages?
 
 The [evidence page](https://honcho.dev/docs/v3/documentation/features/advanced/evidence) says `source_ids` names the conclusions a derived conclusion was reasoned from. You walk that chain back to the explicit statements. An explicit conclusion has none, because it comes from messages rather than from other conclusions. The conclusion object does not carry message ids. To see the messages the dialectic actually read, call chat with `include_evidence: true`. The `evidence.messages` list has `id`, `session_id`, `peer_id`, and `created_at`, and no content. Fetch the message by id for the text. Evidence is what the agent read, not a proof of what the answer used, and on a stream it arrives only on the final event. The architecture page says the dialectic traces a conclusion back to the premises it was drawn from during the request. That trace is the evidence list, not a field on a stored conclusion.
 
-On rift, an explicit conclusion came back with `source_ids: null` and `session_id: "s"`. A stored link from that conclusion to message ids was not found.
+On that server, an explicit conclusion came back with `source_ids: null` and `session_id: "s"`. A stored link from that conclusion to message ids was not found.
 
 ### Q6. When is workspace deletion 409, and how is a session made inactive?
 
 The [deleting-data page](https://honcho.dev/docs/v3/documentation/features/advanced/deleting-data) says a workspace delete returns 409 while any session is still active. There is no separate deactivate call. `DELETE` the session. It is marked inactive immediately and returns 202, after which the workspace delete stops returning 409 even if the cascade is still running. [`SessionUpdate`](https://honcho.dev/docs/v3/api-reference/endpoint/sessions/update-session) has metadata and configuration only, not `is_active`.
 
-Rift returned 409 with `Cannot delete workspace '...': active session(s) remain. Delete all sessions first.` while session `s` existed, and the workspace delete succeeded after that session's 202.
+That server returned 409 with `Cannot delete workspace '...': active session(s) remain. Delete all sessions first.` while session `s` existed, and the workspace delete succeeded after that session's 202.
 
 ### Q7. Is there a health or version endpoint?
 
-OpenAPI 3.2.1 has `GET /health` and no version route. The v1 and v2 indexes list a Prometheus `/metrics` route. The v3 index does not. Rift's `GET /health` returned `200 {"status":"ok"}` and no version. The image string was not in any response.
+OpenAPI 3.2.1 has `GET /health` and no version route. The v1 and v2 indexes list a Prometheus `/metrics` route. The v3 index does not. That server's `GET /health` returned `200 {"status":"ok"}` and no version. The image string was not in any response.
 
-### Q8. Does `3.2.0-pr1092` differ from the 3.2.1 document?
+### Q8. Does this deployment differ from the 3.2.1 document?
 
-The published docs and OpenAPI 3.2.1 are not identical to each other, and rift matched neither on every point. The [search page](https://honcho.dev/docs/v3/documentation/features/advanced/search) shows search returning `{"items":[...]}`. OpenAPI 3.2.1 and rift both return a bare array. Rift also returned 201 for creating a workspace, a peer, and a session, where the 3.2.1 document says 200, and the session-delete body was `{"message":"Session deleted successfully"}`. `source_ids` was `null` rather than `[]`. Conclusion query required observer and observed filters even though the schema marks `filters` optional. `POST /v3/keys` returned 405 because authentication is disabled, which the create-key page says is the self-hosted behavior. The running image name was not reported.
+The published docs and OpenAPI 3.2.1 are not identical to each other, and that server matched neither on every point. The [search page](https://honcho.dev/docs/v3/documentation/features/advanced/search) shows search returning `{"items":[...]}`. OpenAPI 3.2.1 and that server both return a bare array. That server also returned 201 for creating a workspace, a peer, and a session, where the 3.2.1 document says 200, and the session-delete body was `{"message":"Session deleted successfully"}`. `source_ids` was `null` rather than `[]`. Conclusion query required observer and observed filters even though the schema marks `filters` optional. `POST /v3/keys` returned 405 because authentication is disabled, which the create-key page says is the self-hosted behavior. The running image name was not reported.

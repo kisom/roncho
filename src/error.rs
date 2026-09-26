@@ -1,14 +1,15 @@
-use reqwest::StatusCode;
+#[cfg(feature = "async")]
 use serde::Deserialize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[cfg(feature = "async")]
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
 
     #[error("API error (status {status}): {message}")]
-    Api { status: StatusCode, message: String },
+    Api { status: u16, message: String },
 
     #[error("failed to decode JSON response: {0}")]
     Decode(String),
@@ -40,7 +41,7 @@ impl Error {
         matches!(self, Error::Api { .. })
     }
 
-    pub fn status_code(&self) -> Option<StatusCode> {
+    pub fn status_code(&self) -> Option<u16> {
         match self {
             Error::Api { status, .. } => Some(*status),
             _ => None,
@@ -48,12 +49,14 @@ impl Error {
     }
 }
 
+#[cfg(feature = "async")]
 #[derive(Debug, Deserialize)]
 struct ApiErrorBody {
     detail: Option<serde_json::Value>,
 }
 
-pub(crate) fn parse_api_error(status: StatusCode, body: &str) -> Error {
+#[cfg(feature = "async")]
+pub(crate) fn parse_api_error(status: u16, body: &str) -> Error {
     if let Ok(err_body) = serde_json::from_str::<ApiErrorBody>(body) {
         if let Some(detail) = err_body.detail {
             let message = match detail {
