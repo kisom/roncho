@@ -41,10 +41,7 @@ fn workspace_chat_succeeds() {
             .create();
 
         let client = make_client(&server.url());
-        let resp = client
-            .chat("Hello", None)
-            .await
-            .expect("failed to chat");
+        let resp = client.chat("Hello", None).await.expect("failed to chat");
 
         assert_eq!(resp.content(), "Hi there!");
     });

@@ -83,14 +83,15 @@ impl Peer {
     }
 
     /// Get this peer's sessions.
-    pub async fn sessions(
-        &self,
-        opts: &ListOptions,
-    ) -> Result<Page<Session>, Error> {
+    pub async fn sessions(&self, opts: &ListOptions) -> Result<Page<Session>, Error> {
         let page: Page<crate::models::session::Session> =
             peers_api::get_peer_sessions(&self.client, &self.id, opts).await?;
         Ok(Page {
-            items: page.items.into_iter().map(|m| Session::from_model(self.client.clone(), m)).collect(),
+            items: page
+                .items
+                .into_iter()
+                .map(|m| Session::from_model(self.client.clone(), m))
+                .collect(),
             total: page.total,
             page: page.page,
             size: page.size,
@@ -188,10 +189,7 @@ impl Peer {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        crate::resources::conclusions::Conclusions::with_filters(
-            self.client.clone(),
-            filters,
-        )
+        crate::resources::conclusions::Conclusions::with_filters(self.client.clone(), filters)
     }
 }
 

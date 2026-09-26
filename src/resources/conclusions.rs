@@ -35,18 +35,12 @@ impl Conclusions {
     }
 
     /// Create one or more conclusions (batch of 1–100).
-    pub async fn create(
-        &self,
-        batch: ConclusionBatchCreate,
-    ) -> Result<Vec<Conclusion>, Error> {
+    pub async fn create(&self, batch: ConclusionBatchCreate) -> Result<Vec<Conclusion>, Error> {
         conclusions_api::create_conclusions(&self.client, &batch).await
     }
 
     /// List conclusions, ordered by recency unless `reverse` is set.
-    pub async fn list(
-        &self,
-        opts: ConclusionListOptions,
-    ) -> Result<Page<Conclusion>, Error> {
+    pub async fn list(&self, opts: ConclusionListOptions) -> Result<Page<Conclusion>, Error> {
         let mut opts = opts;
         if self.filters.is_some() && opts.filters.is_none() {
             opts.filters = self.filters.clone();

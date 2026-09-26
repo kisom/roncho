@@ -145,10 +145,7 @@ fn get_conclusion_succeeds() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         server
-            .mock(
-                "GET",
-                "/v3/workspaces/test-workspace/conclusions/concl-1",
-            )
+            .mock("GET", "/v3/workspaces/test-workspace/conclusions/concl-1")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(conclusion_body("concl-1"))

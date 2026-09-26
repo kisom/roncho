@@ -2,9 +2,7 @@ use roncho::Honcho;
 
 #[test]
 fn client_builder_requires_api_key() {
-    let result = Honcho::builder()
-        .base_url("http://localhost")
-        .build();
+    let result = Honcho::builder().base_url("http://localhost").build();
     assert!(result.is_err());
 }
 
@@ -31,7 +29,10 @@ fn client_url_construction() {
         .expect("failed to build client");
 
     let url = client.url("peers").expect("failed to construct URL");
-    assert_eq!(url.as_str(), "https://api.example.com/v3/workspaces/ws-1/peers");
+    assert_eq!(
+        url.as_str(),
+        "https://api.example.com/v3/workspaces/ws-1/peers"
+    );
 }
 
 #[test]
@@ -46,7 +47,10 @@ fn client_url_with_id() {
     let url = client
         .url("peers/peer-1/chat")
         .expect("failed to construct URL");
-    assert_eq!(url.as_str(), "https://api.example.com/v3/workspaces/ws-1/peers/peer-1/chat");
+    assert_eq!(
+        url.as_str(),
+        "https://api.example.com/v3/workspaces/ws-1/peers/peer-1/chat"
+    );
 }
 
 #[test]
@@ -111,7 +115,8 @@ fn session_context_request_defaults() {
 
 #[test]
 fn chat_response_content() {
-    let resp: roncho::models::chat::ChatResponse = serde_json::from_str(r#"{"content":"Hello"}"#).unwrap();
+    let resp: roncho::models::chat::ChatResponse =
+        serde_json::from_str(r#"{"content":"Hello"}"#).unwrap();
     assert_eq!(resp.content(), "Hello");
     assert!(resp.content.is_some());
 }

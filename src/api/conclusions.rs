@@ -25,7 +25,9 @@ pub async fn list_conclusions(
     let query = client.list_query_params(&list_opts);
     let filters = opts.filters.clone().unwrap_or_default();
     let body = serde_json::json!({ "filters": filters });
-    client.post_json_query("conclusions/list", &query, &body).await
+    client
+        .post_json_query("conclusions/list", &query, &body)
+        .await
 }
 
 pub async fn query_conclusions(
@@ -36,18 +38,12 @@ pub async fn query_conclusions(
     client.post_json("conclusions/query", &body).await
 }
 
-pub async fn get_conclusion(
-    client: &Honcho,
-    conclusion_id: &str,
-) -> Result<Conclusion, Error> {
+pub async fn get_conclusion(client: &Honcho, conclusion_id: &str) -> Result<Conclusion, Error> {
     let path = format!("conclusions/{}", conclusion_id);
     client.get_json(&path, &[]).await
 }
 
-pub async fn delete_conclusion(
-    client: &Honcho,
-    conclusion_id: &str,
-) -> Result<(), Error> {
+pub async fn delete_conclusion(client: &Honcho, conclusion_id: &str) -> Result<(), Error> {
     let path = format!("conclusions/{}", conclusion_id);
     client.delete_json::<serde_json::Value>(&path).await?;
     Ok(())

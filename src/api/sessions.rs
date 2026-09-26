@@ -1,11 +1,11 @@
 use serde_json::json;
 
+use crate::client::Honcho;
 use crate::error::Error;
 use crate::models::context::SessionContext;
 use crate::models::message::{Message, MessageCreate};
 use crate::models::page::{ListOptions, Page};
 use crate::models::session::{Session, SessionCreate, SessionPeerConfig};
-use crate::client::Honcho;
 
 pub async fn get_or_create_session(
     client: &Honcho,
@@ -15,10 +15,7 @@ pub async fn get_or_create_session(
     client.post_json("sessions", &body).await
 }
 
-pub async fn list_sessions(
-    client: &Honcho,
-    opts: &ListOptions,
-) -> Result<Page<Session>, Error> {
+pub async fn list_sessions(client: &Honcho, opts: &ListOptions) -> Result<Page<Session>, Error> {
     let query = client.list_query_params(opts);
     client.get_json("sessions", &query).await
 }
@@ -197,18 +194,12 @@ pub async fn clone_session(
     client.post_json(&path, &body).await
 }
 
-pub async fn delete_session(
-    client: &Honcho,
-    session_id: &str,
-) -> Result<serde_json::Value, Error> {
+pub async fn delete_session(client: &Honcho, session_id: &str) -> Result<serde_json::Value, Error> {
     let path = format!("sessions/{}", session_id);
     client.delete_json(&path).await
 }
 
-pub async fn get_session(
-    client: &Honcho,
-    session_id: &str,
-) -> Result<Session, Error> {
+pub async fn get_session(client: &Honcho, session_id: &str) -> Result<Session, Error> {
     let path = format!("sessions/{}", session_id);
     client.get_json::<Session>(&path, &[]).await
 }

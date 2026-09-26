@@ -21,7 +21,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Session: {}", session.id);
 
     let _msg = session
-        .add_messages(&[MessageCreate { content: "Hello, Honcho!".to_string(), peer_id: peer.id.clone(), metadata: None, created_at: None }])
+        .add_messages(&[MessageCreate {
+            content: "Hello, Honcho!".to_string(),
+            peer_id: peer.id.clone(),
+            metadata: None,
+            created_at: None,
+        }])
         .await
         .expect("failed to add message");
 

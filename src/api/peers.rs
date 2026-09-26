@@ -4,26 +4,20 @@ use async_stream::stream;
 use futures::Stream;
 use serde_json::json;
 
+use crate::client::Honcho;
 use crate::error::Error;
 use crate::models::chat::{ChatResponse, DialecticOptions, ReasoningLevel, StreamChunk};
 use crate::models::message::Message;
 use crate::models::page::{ListOptions, Page};
 use crate::models::peer::{Peer, PeerCreate};
 use crate::models::session::Session;
-use crate::client::Honcho;
 
-pub async fn get_or_create_peer(
-    client: &Honcho,
-    create: &PeerCreate,
-) -> Result<Peer, Error> {
+pub async fn get_or_create_peer(client: &Honcho, create: &PeerCreate) -> Result<Peer, Error> {
     let body = serde_json::to_value(create).map_err(|e| Error::Encode(e.to_string()))?;
     client.post_json("peers", &body).await
 }
 
-pub async fn list_peers(
-    client: &Honcho,
-    opts: &ListOptions,
-) -> Result<Page<Peer>, Error> {
+pub async fn list_peers(client: &Honcho, opts: &ListOptions) -> Result<Page<Peer>, Error> {
     let query = client.list_query_params(opts);
     client.get_json("peers", &query).await
 }

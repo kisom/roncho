@@ -34,19 +34,13 @@ pub struct Summary {
 }
 
 impl SessionContext {
-    pub fn to_openai(
-        &self,
-        assistant: &super::peer::Peer,
-    ) -> Vec<OpenAIMessage> {
+    pub fn to_openai(&self, assistant: &super::peer::Peer) -> Vec<OpenAIMessage> {
         let mut messages = Vec::new();
 
         if let Some(rep) = &self.peer_representation {
             messages.push(OpenAIMessage {
                 role: "system".to_string(),
-                content: format!(
-                    "Peer context for {}: {}",
-                    assistant.id, rep
-                ),
+                content: format!("Peer context for {}: {}", assistant.id, rep),
             });
         }
 
@@ -75,19 +69,13 @@ impl SessionContext {
         messages
     }
 
-    pub fn to_anthropic(
-        &self,
-        assistant: &super::peer::Peer,
-    ) -> Vec<AnthropicMessage> {
+    pub fn to_anthropic(&self, assistant: &super::peer::Peer) -> Vec<AnthropicMessage> {
         let mut messages = Vec::new();
 
         if let Some(rep) = &self.peer_representation {
             messages.push(AnthropicMessage {
                 role: "assistant".to_string(),
-                content: format!(
-                    "Peer context for {}: {}",
-                    assistant.id, rep
-                ),
+                content: format!("Peer context for {}: {}", assistant.id, rep),
             });
         }
 

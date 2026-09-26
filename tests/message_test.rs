@@ -1,5 +1,5 @@
-use mockito::Server;
 use chrono::Utc;
+use mockito::Server;
 
 mod common;
 use common::make_client;
@@ -18,7 +18,10 @@ fn create_message_succeeds() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         server
-            .mock("POST", "/v3/workspaces/test-workspace/sessions/sess-1/messages")
+            .mock(
+                "POST",
+                "/v3/workspaces/test-workspace/sessions/sess-1/messages",
+            )
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(format!("[{}]", make_message_json("msg-1", "Hello")))

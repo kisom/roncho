@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use url::Url;
 
-use crate::error::{Error, parse_api_error};
+use crate::error::{parse_api_error, Error};
 use crate::models::page::ListOptions;
 
 const DEFAULT_BASE_URL: &str = "https://api.honcho.dev";
@@ -67,8 +67,7 @@ impl Honcho {
         let auth_value = format!("Bearer {}", self.api_key);
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&auth_value)
-                .map_err(|e| Error::Configuration(e.to_string()))?,
+            HeaderValue::from_str(&auth_value).map_err(|e| Error::Configuration(e.to_string()))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
@@ -112,7 +111,9 @@ impl Honcho {
             return Err(parse_api_error(status, &text));
         }
 
-        resp.json::<T>().await.map_err(|e| Error::Decode(e.to_string()))
+        resp.json::<T>()
+            .await
+            .map_err(|e| Error::Decode(e.to_string()))
     }
 
     pub(crate) async fn post_json<T: serde::de::DeserializeOwned>(
@@ -138,7 +139,9 @@ impl Honcho {
             return Err(parse_api_error(status, &text));
         }
 
-        resp.json::<T>().await.map_err(|e| Error::Decode(e.to_string()))
+        resp.json::<T>()
+            .await
+            .map_err(|e| Error::Decode(e.to_string()))
     }
 
     pub(crate) async fn post_json_query<T: serde::de::DeserializeOwned>(
@@ -166,7 +169,9 @@ impl Honcho {
             return Err(parse_api_error(status, &text));
         }
 
-        resp.json::<T>().await.map_err(|e| Error::Decode(e.to_string()))
+        resp.json::<T>()
+            .await
+            .map_err(|e| Error::Decode(e.to_string()))
     }
 
     pub(crate) async fn delete_json<T: serde::de::DeserializeOwned>(
@@ -195,7 +200,9 @@ impl Honcho {
             return Ok(serde_json::from_str("{}").unwrap());
         }
 
-        resp.json::<T>().await.map_err(|e| Error::Decode(e.to_string()))
+        resp.json::<T>()
+            .await
+            .map_err(|e| Error::Decode(e.to_string()))
     }
 }
 
@@ -261,10 +268,11 @@ impl HonchoBuilder {
             .or_else(|| std::env::var("HONCHO_BASE_URL").ok())
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let base_url = Url::parse(&base_url_str)
-            .map_err(|e| Error::InvalidUrl(e.to_string()))?;
+        let base_url = Url::parse(&base_url_str).map_err(|e| Error::InvalidUrl(e.to_string()))?;
 
-        let timeout = self.timeout.unwrap_or(Duration::from_secs(DEFAULT_TIMEOUT_SECS));
+        let timeout = self
+            .timeout
+            .unwrap_or(Duration::from_secs(DEFAULT_TIMEOUT_SECS));
         let max_retries = self.max_retries.unwrap_or(DEFAULT_MAX_RETRIES);
 
         let mut headers = HeaderMap::new();

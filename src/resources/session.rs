@@ -88,10 +88,7 @@ impl Session {
     }
 
     /// Add messages to this session.
-    pub async fn add_messages(
-        &self,
-        messages: &[MessageCreate],
-    ) -> Result<Vec<Message>, Error> {
+    pub async fn add_messages(&self, messages: &[MessageCreate]) -> Result<Vec<Message>, Error> {
         sessions_api::create_messages(&self.client, &self.id, messages).await
     }
 
@@ -115,12 +112,7 @@ impl Session {
             let mut page = 1usize;
             loop {
                 let opts = ListOptions::default().page(page).size(page_size);
-                let result = sessions_api::list_messages(
-                    &client,
-                    &session_id,
-                    &opts,
-                    None,
-                ).await;
+                let result = sessions_api::list_messages(&client, &session_id, &opts, None).await;
                 match result {
                     Ok(page_data) => {
                         let has_next = page_data.has_next();
@@ -142,10 +134,7 @@ impl Session {
     }
 
     /// Get formatted conversation context for LLM integration.
-    pub async fn context(
-        &self,
-        opts: &SessionContextRequest,
-    ) -> Result<SessionContext, Error> {
+    pub async fn context(&self, opts: &SessionContextRequest) -> Result<SessionContext, Error> {
         let api_opts = sessions_api::SessionContextOptions {
             tokens: opts.tokens,
             search_query: opts.search_query.clone(),

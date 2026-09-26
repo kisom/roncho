@@ -37,15 +37,15 @@ impl SessionCreate {
         }
     }
 
-    pub fn with_peers(mut self, peers: std::collections::HashMap<String, SessionPeerConfig>) -> Self {
+    pub fn with_peers(
+        mut self,
+        peers: std::collections::HashMap<String, SessionPeerConfig>,
+    ) -> Self {
         self.peers = Some(peers);
         self
     }
 
-    pub fn with_metadata(
-        mut self,
-        metadata: serde_json::Map<String, serde_json::Value>,
-    ) -> Self {
+    pub fn with_metadata(mut self, metadata: serde_json::Map<String, serde_json::Value>) -> Self {
         self.metadata = Some(metadata);
         self
     }

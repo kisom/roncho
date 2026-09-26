@@ -8,10 +8,7 @@ pub enum Error {
     Http(#[from] reqwest::Error),
 
     #[error("API error (status {status}): {message}")]
-    Api {
-        status: StatusCode,
-        message: String,
-    },
+    Api { status: StatusCode, message: String },
 
     #[error("failed to decode JSON response: {0}")]
     Decode(String),
