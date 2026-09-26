@@ -4,7 +4,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use super::error::Error;
-use super::http::{self, RawRequest};
+use super::http::{self, LiveBody, RawRequest};
+use super::stream::{self, ChatStream};
 use crate::models::chat::{ChatResponse, DialecticOptions, ReasoningLevel, ScopeNames};
 use crate::models::conclusions::{
     Conclusion, ConclusionBatchCreate, ConclusionListOptions, ConclusionQuery,
@@ -30,6 +31,9 @@ pub struct Client {
     connect_timeout: Duration,
     read_timeout: Duration,
     max_body: usize,
+    https: bool,
+    #[cfg(feature = "tls")]
+    tls: Option<std::sync::Arc<rustls::ClientConfig>>,
 }
 
 impl std::fmt::Debug for Client {
@@ -37,6 +41,7 @@ impl std::fmt::Debug for Client {
         f.debug_struct("Client")
             .field("host", &self.host)
             .field("port", &self.port)
+            .field("https", &self.https)
             .field("workspace_id", &self.workspace_id)
             .field("api_key_present", &self.api_key.is_some())
             .field("connect_timeout", &self.connect_timeout)
@@ -200,6 +205,29 @@ impl Client {
         self.call("POST", &path, None, Some(search_body(search)))
     }
 
+    /// `POST /v3/workspaces/{workspace}/peers/{peer}/chat` with `stream: true`.
+    pub fn peer_chat_stream(
+        &self,
+        peer_id: &str,
+        opts: &DialecticOptions,
+    ) -> Result<ChatStream, Error> {
+        let path = self.scoped(&format!("peers/{}/chat", enc(peer_id)?));
+        self.open_chat(&path, chat_body(&stream::streaming_opts(opts), true))
+    }
+
+    /// `POST /v3/workspaces/{workspace}/chat` with `stream: true`.
+    pub fn workspace_chat_stream(&self, opts: &DialecticOptions) -> Result<ChatStream, Error> {
+        if opts.target.is_some() || opts.filters.is_some() {
+            return Err(Error::Config(
+                "workspace chat has no target or filters".into(),
+            ));
+        }
+        self.open_chat(
+            &self.scoped("chat"),
+            chat_body(&stream::streaming_opts(opts), false),
+        )
+    }
+
     /// `POST /v3/workspaces/{workspace}/peers/{peer}/chat`. Not streamed.
     pub fn peer_chat(&self, peer_id: &str, opts: &DialecticOptions) -> Result<ChatResponse, Error> {
         let path = self.scoped(&format!("peers/{}/chat", enc(peer_id)?));
@@ -270,6 +298,34 @@ impl Client {
         Ok(())
     }
 
+    fn open_chat(&self, path: &str, body: Value) -> Result<ChatStream, Error> {
+        let owned = body.to_string().into_bytes();
+        let live = self.open_live(&RawRequest {
+            method: "POST",
+            path,
+            host_header: &self.host_header,
+            authorization: self.api_key.as_deref(),
+            body: Some(&owned),
+        })?;
+        Ok(ChatStream::from_body(live))
+    }
+
+    fn open_live(&self, request: &RawRequest<'_>) -> Result<LiveBody, Error> {
+        http::open(&self.endpoint(), request)
+    }
+
+    fn endpoint(&self) -> http::Endpoint<'_> {
+        http::Endpoint {
+            host: &self.host,
+            port: self.port,
+            connect_timeout: self.connect_timeout,
+            read_timeout: self.read_timeout,
+            max_body: self.max_body,
+            #[cfg(feature = "tls")]
+            tls: self.tls.as_ref(),
+        }
+    }
+
     fn raw(
         &self,
         method: &str,
@@ -283,11 +339,7 @@ impl Client {
         };
         let owned = body.map(|value| value.to_string().into_bytes());
         http::exchange(
-            &self.host,
-            self.port,
-            self.connect_timeout,
-            self.read_timeout,
-            self.max_body,
+            &self.endpoint(),
             &RawRequest {
                 method,
                 path: &path,
@@ -330,7 +382,7 @@ impl Default for ClientBuilder {
 }
 
 impl ClientBuilder {
-    /// `http://host` or `http://host:port`. Required. `https://` is rejected.
+    /// `http://host[:port]`. With the `tls` feature, `https://host[:port]` is also accepted.
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = Some(url.into());
         self
@@ -375,6 +427,12 @@ impl ClientBuilder {
         if self.max_body == 0 {
             return Err(Error::Config("max body must be greater than zero".into()));
         }
+        #[cfg(feature = "tls")]
+        let tls = if origin.https {
+            Some(super::tls::config()?)
+        } else {
+            None
+        };
         Ok(Client {
             host: origin.host,
             port: origin.port,
@@ -384,6 +442,9 @@ impl ClientBuilder {
             connect_timeout: self.connect_timeout,
             read_timeout: self.read_timeout,
             max_body: self.max_body,
+            https: origin.https,
+            #[cfg(feature = "tls")]
+            tls,
         })
     }
 }
@@ -392,12 +453,27 @@ struct Origin {
     host: String,
     port: u16,
     host_header: String,
+    https: bool,
 }
 
 fn parse_origin(raw: &str) -> Result<Origin, Error> {
-    let rest = raw
-        .strip_prefix("http://")
-        .ok_or_else(|| Error::Config("base URL must be http:// (no TLS in this build)".into()))?;
+    let (rest, https) = if let Some(rest) = raw.strip_prefix("https://") {
+        #[cfg(not(feature = "tls"))]
+        {
+            let _ = rest;
+            return Err(Error::Config(
+                "https requires the tls feature; this build speaks http only".into(),
+            ));
+        }
+        #[cfg(feature = "tls")]
+        (rest, true)
+    } else if let Some(rest) = raw.strip_prefix("http://") {
+        (rest, false)
+    } else {
+        return Err(Error::Config(
+            "base URL must start with http:// or https://".into(),
+        ));
+    };
     if rest.is_empty() || rest.contains('@') || rest.contains('?') || rest.contains('#') {
         return Err(Error::Config("base URL must be an http origin".into()));
     }
@@ -413,7 +489,13 @@ fn parse_origin(raw: &str) -> Result<Origin, Error> {
             .split_once(']')
             .ok_or_else(|| Error::Config("bad IPv6 host".into()))?;
         let port = match port {
-            "" => 80,
+            "" => {
+                if https {
+                    443
+                } else {
+                    80
+                }
+            }
             rest => rest
                 .strip_prefix(':')
                 .and_then(|p| p.parse().ok())
@@ -427,14 +509,14 @@ fn parse_origin(raw: &str) -> Result<Origin, Error> {
         let port = port.parse().map_err(|_| Error::Config("bad port".into()))?;
         (host.to_string(), port)
     } else {
-        (authority.to_string(), 80)
+        (authority.to_string(), if https { 443 } else { 80 })
     };
     if host.is_empty() {
         return Err(Error::Config("base URL is missing a host".into()));
     }
     let host_header = if host.contains(':') {
         format!("[{host}]:{port}")
-    } else if port == 80 {
+    } else if (!https && port == 80) || (https && port == 443) {
         host.clone()
     } else {
         format!("{host}:{port}")
@@ -443,6 +525,7 @@ fn parse_origin(raw: &str) -> Result<Origin, Error> {
         host,
         port,
         host_header,
+        https,
     })
 }
 

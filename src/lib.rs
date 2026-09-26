@@ -8,6 +8,7 @@ pub mod error;
 pub mod models;
 #[cfg(feature = "async")]
 pub mod resources;
+pub(crate) mod sse;
 
 #[cfg(feature = "async")]
 pub use client::Honcho;

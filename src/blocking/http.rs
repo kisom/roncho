@@ -4,6 +4,9 @@ use std::time::Duration;
 
 use super::error::{is_timeout, Error};
 
+#[cfg(feature = "tls")]
+use super::tls;
+
 const MAX_HEAD: usize = 16 * 1024;
 const STATUS_BODY_CAP: usize = 4 * 1024;
 
@@ -20,36 +23,290 @@ pub(crate) struct RawResponse {
     pub body: Vec<u8>,
 }
 
+pub(crate) struct Endpoint<'a> {
+    pub host: &'a str,
+    pub port: u16,
+    pub connect_timeout: Duration,
+    pub read_timeout: Duration,
+    pub max_body: usize,
+    #[cfg(feature = "tls")]
+    pub tls: Option<&'a std::sync::Arc<rustls::ClientConfig>>,
+}
+
 pub(crate) fn exchange(
-    host: &str,
-    port: u16,
-    connect_timeout: Duration,
-    read_timeout: Duration,
-    max_body: usize,
+    endpoint: &Endpoint<'_>,
     request: &RawRequest<'_>,
 ) -> Result<RawResponse, Error> {
-    let addr = format!("{host}:{port}")
-        .to_socket_addrs()
-        .map_err(Error::Connect)?
-        .next()
-        .ok_or_else(|| Error::Config(format!("no address for {host}:{port}")))?;
-    let mut stream = TcpStream::connect_timeout(&addr, connect_timeout).map_err(Error::Connect)?;
-    stream
-        .set_read_timeout(Some(read_timeout))
-        .map_err(Error::Io)?;
-    stream
-        .set_write_timeout(Some(read_timeout))
-        .map_err(Error::Io)?;
-
-    let bytes = encode(request);
-    stream.write_all(&bytes).map_err(map_io)?;
-
-    let (status, rest) = read_head(&mut stream, max_body)?;
+    let mut stream = dial(endpoint)?;
+    stream.write_all(&encode(request)).map_err(map_io)?;
+    let (status, rest) = read_head(&mut stream, endpoint.max_body)?;
     if (300..400).contains(&status) {
         return Err(Error::Redirect { status });
     }
-    let body = read_body(&mut stream, &rest.headers, rest.already, max_body)?;
+    let body = read_body(&mut stream, &rest.headers, rest.already, endpoint.max_body)?;
     Ok(RawResponse { status, body })
+}
+
+/// Send one request and return the body as a pull source. A non-2xx status is
+/// still an error, after the body is read up to the cap.
+pub(crate) fn open(endpoint: &Endpoint<'_>, request: &RawRequest<'_>) -> Result<LiveBody, Error> {
+    let mut stream = dial(endpoint)?;
+    stream.write_all(&encode(request)).map_err(map_io)?;
+    let (status, rest) = read_head(&mut stream, endpoint.max_body)?;
+    if (300..400).contains(&status) {
+        return Err(Error::Redirect { status });
+    }
+    if !(200..300).contains(&status) {
+        let body = read_body(&mut stream, &rest.headers, rest.already, endpoint.max_body)?;
+        return Err(Error::Status {
+            status,
+            body: body_prefix(&body),
+        });
+    }
+    LiveBody::new(stream, rest, endpoint.max_body)
+}
+
+enum Conn {
+    Plain(TcpStream),
+    #[cfg(feature = "tls")]
+    Tls(Box<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>),
+}
+
+impl Read for Conn {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Conn::Plain(stream) => stream.read(buf),
+            #[cfg(feature = "tls")]
+            Conn::Tls(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for Conn {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Conn::Plain(stream) => stream.write(buf),
+            #[cfg(feature = "tls")]
+            Conn::Tls(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Conn::Plain(stream) => stream.flush(),
+            #[cfg(feature = "tls")]
+            Conn::Tls(stream) => stream.flush(),
+        }
+    }
+}
+
+fn dial(endpoint: &Endpoint<'_>) -> Result<Conn, Error> {
+    let addr = format!("{}:{}", endpoint.host, endpoint.port)
+        .to_socket_addrs()
+        .map_err(Error::Connect)?
+        .next()
+        .ok_or_else(|| {
+            Error::Config(format!(
+                "no address for {}:{}",
+                endpoint.host, endpoint.port
+            ))
+        })?;
+    let stream =
+        TcpStream::connect_timeout(&addr, endpoint.connect_timeout).map_err(Error::Connect)?;
+    stream
+        .set_read_timeout(Some(endpoint.read_timeout))
+        .map_err(Error::Io)?;
+    stream
+        .set_write_timeout(Some(endpoint.read_timeout))
+        .map_err(Error::Io)?;
+    #[cfg(feature = "tls")]
+    if let Some(config) = endpoint.tls {
+        return Ok(Conn::Tls(Box::new(tls::wrap(stream, endpoint.host, config)?)));
+    }
+    Ok(Conn::Plain(stream))
+}
+
+enum Kind {
+    Length { left: usize },
+    Chunked,
+    Close,
+}
+
+enum ChunkPhase {
+    Size,
+    Data,
+    Crlf,
+}
+
+pub(crate) struct LiveBody {
+    stream: Conn,
+    raw: Vec<u8>,
+    kind: Kind,
+    phase: ChunkPhase,
+    chunk_left: usize,
+    produced: usize,
+    max_body: usize,
+    finished: bool,
+}
+
+impl LiveBody {
+    fn new(stream: Conn, rest: HeadRest, max_body: usize) -> Result<Self, Error> {
+        let kind = if rest
+            .headers
+            .iter()
+            .any(|(k, v)| k == "transfer-encoding" && v.eq_ignore_ascii_case("chunked"))
+        {
+            Kind::Chunked
+        } else if let Some((_, len)) = rest.headers.iter().find(|(k, _)| k == "content-length") {
+            let left: usize = len
+                .parse()
+                .map_err(|_| Error::Decode("content-length".into()))?;
+            if left > max_body {
+                return Err(Error::TooLarge);
+            }
+            Kind::Length { left }
+        } else {
+            Kind::Close
+        };
+        Ok(Self {
+            stream,
+            raw: rest.already,
+            kind,
+            phase: ChunkPhase::Size,
+            chunk_left: 0,
+            produced: 0,
+            max_body,
+            finished: false,
+        })
+    }
+
+    /// Next decoded body bytes. `Ok(None)` is a clean end.
+    pub(crate) fn read_some(&mut self) -> Result<Option<Vec<u8>>, Error> {
+        if self.finished {
+            return Ok(None);
+        }
+        let mut out = Vec::new();
+        loop {
+            if !out.is_empty() {
+                return Ok(Some(out));
+            }
+            if self.finished {
+                return Ok(None);
+            }
+            self.pump(&mut out)?;
+        }
+    }
+
+    fn pump(&mut self, out: &mut Vec<u8>) -> Result<(), Error> {
+        match self.kind {
+            Kind::Length { left } => {
+                if left == 0 {
+                    self.finished = true;
+                    return Ok(());
+                }
+                if self.raw.is_empty() {
+                    self.fill_raw()?;
+                }
+                let take = self.raw.len().min(left);
+                self.take(out, take)?;
+                if let Kind::Length { left } = &mut self.kind {
+                    *left -= take;
+                    if *left == 0 {
+                        self.finished = true;
+                    }
+                }
+                Ok(())
+            }
+            Kind::Close => {
+                if self.raw.is_empty() {
+                    match self.fill_raw() {
+                        Ok(()) => {}
+                        Err(Error::Closed) => {
+                            self.finished = true;
+                            return Ok(());
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+                let take = self.raw.len();
+                self.take(out, take)
+            }
+            Kind::Chunked => self.pump_chunk(out),
+        }
+    }
+
+    fn pump_chunk(&mut self, out: &mut Vec<u8>) -> Result<(), Error> {
+        let mut tmp = [0u8; 8192];
+        match self.phase {
+            ChunkPhase::Size => {
+                let Some(pos) = find(&self.raw, b"\r\n") else {
+                    if self.raw.len() > 64 {
+                        return Err(Error::Decode("chunk size".into()));
+                    }
+                    return self.read_socket(&mut tmp);
+                };
+                let size = parse_chunk_size(&self.raw[..pos])?;
+                self.raw.drain(..pos + 2);
+                if size == 0 {
+                    self.finished = true;
+                } else {
+                    self.chunk_left = size;
+                    self.phase = ChunkPhase::Data;
+                }
+                Ok(())
+            }
+            ChunkPhase::Data => {
+                if self.raw.is_empty() {
+                    return self.read_socket(&mut tmp);
+                }
+                let take = self.raw.len().min(self.chunk_left);
+                self.take(out, take)?;
+                self.chunk_left -= take;
+                if self.chunk_left == 0 {
+                    self.phase = ChunkPhase::Crlf;
+                }
+                Ok(())
+            }
+            ChunkPhase::Crlf => {
+                if self.raw.len() < 2 {
+                    return self.read_socket(&mut tmp);
+                }
+                if &self.raw[..2] != b"\r\n" {
+                    return Err(Error::Decode("chunk".into()));
+                }
+                self.raw.drain(..2);
+                self.phase = ChunkPhase::Size;
+                Ok(())
+            }
+        }
+    }
+
+    fn take(&mut self, out: &mut Vec<u8>, n: usize) -> Result<(), Error> {
+        if self.produced.saturating_add(n) > self.max_body {
+            return Err(Error::TooLarge);
+        }
+        out.extend_from_slice(&self.raw[..n]);
+        self.raw.drain(..n);
+        self.produced += n;
+        Ok(())
+    }
+
+    fn fill_raw(&mut self) -> Result<(), Error> {
+        let mut tmp = [0u8; 8192];
+        self.read_socket(&mut tmp)
+    }
+
+    fn read_socket(&mut self, tmp: &mut [u8]) -> Result<(), Error> {
+        match self.stream.read(tmp) {
+            Ok(0) => Err(Error::Closed),
+            Ok(n) => {
+                self.raw.extend_from_slice(&tmp[..n]);
+                Ok(())
+            }
+            Err(err) if is_timeout(&err) => Err(Error::Timeout),
+            Err(err) => Err(Error::Io(err)),
+        }
+    }
 }
 
 struct HeadRest {
@@ -88,7 +345,7 @@ fn push(out: &mut Vec<u8>, text: impl AsRef<[u8]>) {
     out.extend_from_slice(text.as_ref());
 }
 
-fn read_head(stream: &mut TcpStream, max_body: usize) -> Result<(u16, HeadRest), Error> {
+fn read_head(stream: &mut Conn, max_body: usize) -> Result<(u16, HeadRest), Error> {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 8192];
     loop {
@@ -143,7 +400,7 @@ fn parse_head(bytes: &[u8]) -> Result<(u16, Vec<(String, String)>), Error> {
 }
 
 fn read_body(
-    stream: &mut TcpStream,
+    stream: &mut Conn,
     headers: &[(String, String)],
     already: Vec<u8>,
     max_body: usize,
@@ -200,11 +457,7 @@ fn read_body(
     }
 }
 
-fn read_chunked(
-    stream: &mut TcpStream,
-    mut buf: Vec<u8>,
-    max_body: usize,
-) -> Result<Vec<u8>, Error> {
+fn read_chunked(stream: &mut Conn, mut buf: Vec<u8>, max_body: usize) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
     let mut tmp = [0u8; 8192];
     loop {

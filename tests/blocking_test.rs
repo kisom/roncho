@@ -67,10 +67,13 @@ fn builder_requires_base_url_and_workspace_and_rejects_https() {
     let missing = Client::builder().workspace_id("box").build();
     assert!(missing.is_err());
     let https = Client::builder()
-        .base_url("https://rift.example")
+        .base_url("https://127.0.0.1:9")
         .workspace_id("box")
         .build();
+    #[cfg(not(feature = "tls"))]
     assert!(https.is_err());
+    #[cfg(feature = "tls")]
+    assert!(https.is_ok());
     let ok = Client::builder()
         .base_url("http://127.0.0.1:9")
         .workspace_id("box")
@@ -289,6 +292,92 @@ fn refused_timeout_partial_redirect_oversize_and_garbage() {
         .get_or_create_workspace(&WorkspaceCreate::new("box"))
         .unwrap_err();
     assert!(matches!(err, roncho::blocking::Error::Decode(_)));
+}
+
+fn chunk(data: &str) -> Vec<u8> {
+    format!("{:x}\r\n{data}\r\n", data.len()).into_bytes()
+}
+
+#[test]
+fn chat_stream_reassembles_events_and_times_out_between_them() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        sock.set_nodelay(true).unwrap();
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 2048];
+        loop {
+            let n = sock.read(&mut tmp).unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+        sock.write_all(head).unwrap();
+        sock.write_all(&chunk("data: {\"delta\":{\"content\":\"Hel"))
+            .unwrap();
+        sock.flush().unwrap();
+        thread::sleep(Duration::from_millis(40));
+        sock.write_all(&chunk("lo\"},\"done\":false}\n\n")).unwrap();
+        sock.write_all(&chunk("data: {\"done\":true}\n\n")).unwrap();
+        sock.write_all(b"0\r\n\r\n").unwrap();
+    });
+    let client = client_at(port);
+    let mut events: Vec<_> = client
+        .peer_chat_stream(
+            "p",
+            &DialecticOptions {
+                query: "q".into(),
+                ..DialecticOptions::default()
+            },
+        )
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(events[0].content, "Hello");
+    assert!(events.last().unwrap().done);
+    let _ = events.pop();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 2048];
+        let _ = sock.read(&mut buf);
+        let head = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+        sock.write_all(head).unwrap();
+        sock.write_all(&chunk(
+            "data: {\"delta\":{\"content\":\"Hi\"},\"done\":false}\n\n",
+        ))
+        .unwrap();
+        sock.flush().unwrap();
+        thread::sleep(Duration::from_millis(400));
+    });
+    let client = Client::builder()
+        .base_url(format!("http://127.0.0.1:{port}"))
+        .workspace_id("box")
+        .read_timeout(Duration::from_millis(100))
+        .connect_timeout(Duration::from_secs(1))
+        .build()
+        .unwrap();
+    let mut stream = client
+        .peer_chat_stream(
+            "p",
+            &DialecticOptions {
+                query: "q".into(),
+                ..DialecticOptions::default()
+            },
+        )
+        .unwrap();
+    let first = stream.next().unwrap().unwrap();
+    assert_eq!(first.content, "Hi");
+    let err = stream.next().unwrap().unwrap_err();
+    assert!(matches!(err, roncho::blocking::Error::Timeout));
 }
 
 /// Live checks against the owner's Honcho on rift. Ignored unless run by name.

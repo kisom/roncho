@@ -43,7 +43,7 @@ let client = Client::builder()
     .build()?;
 ```
 
-The API key is optional. When it is set it is sent as `Authorization: Bearer` and it is omitted from `Debug`. The client reads no environment variables and does not follow redirects. See `CHANGELOG.md` and `docs/rift-2026-09-25.md`.
+The API key is optional. When it is set it is sent as `Authorization: Bearer` and it is omitted from `Debug`. The client reads no environment variables and does not follow redirects. `https://` needs the `tls` feature (`rustls` 0.23 with the `ring` provider and the platform certificate store). See `CHANGELOG.md` and `docs/rift-2026-09-25.md`.
 
 ## Configuration
 

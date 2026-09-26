@@ -19,6 +19,8 @@ pub enum Error {
     TooLarge,
     /// The body was not the JSON the operation expected.
     Decode(String),
+    /// A chat stream event was not the documented SSE payload.
+    Stream(String),
     /// Builder inputs were missing or not an `http://` origin.
     Config(String),
     /// A socket error that is neither a connect failure nor a timeout.
@@ -38,6 +40,7 @@ impl fmt::Display for Error {
             }
             Error::TooLarge => write!(f, "response body exceeded the configured cap"),
             Error::Decode(err) => write!(f, "response was not usable JSON: {err}"),
+            Error::Stream(err) => write!(f, "chat stream error: {err}"),
             Error::Config(err) => write!(f, "invalid client configuration: {err}"),
             Error::Io(err) => write!(f, "socket error: {err}"),
         }

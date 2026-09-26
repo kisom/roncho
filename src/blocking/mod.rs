@@ -6,6 +6,10 @@
 mod client;
 mod error;
 mod http;
+mod stream;
+#[cfg(feature = "tls")]
+mod tls;
 
 pub use client::{Client, ClientBuilder, Probe};
 pub use error::Error;
+pub use stream::ChatStream;
