@@ -9,7 +9,7 @@ fn pagination_first_page_has_next() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         server
-            .mock("GET", "/v3/workspaces/test-workspace/sessions")
+            .mock("POST", "/v3/workspaces/test-workspace/sessions/list")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_header("content-type", "application/json")
@@ -33,7 +33,7 @@ fn pagination_last_page() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         server
-            .mock("GET", "/v3/workspaces/test-workspace/peers")
+            .mock("POST", "/v3/workspaces/test-workspace/peers/list")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_header("content-type", "application/json")
@@ -55,7 +55,7 @@ fn pagination_single_page() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         server
-            .mock("GET", "/v3/workspaces/test-workspace/sessions")
+            .mock("POST", "/v3/workspaces/test-workspace/sessions/list")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_header("content-type", "application/json")

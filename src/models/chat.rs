@@ -3,7 +3,7 @@ use std::pin::Pin;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 
-use crate::models::conclusions::Conclusion;
+use crate::models::conclusions::Level;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
@@ -21,7 +21,7 @@ impl ChatResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
     #[serde(default)]
-    pub conclusions: Vec<Conclusion>,
+    pub conclusions: Vec<EvidenceObservation>,
     #[serde(default)]
     pub messages: Vec<EvidenceMessageRef>,
     #[serde(default)]
@@ -43,11 +43,34 @@ pub struct EvidenceMessageRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceObservation {
+    pub id: String,
+    pub level: Level,
+    pub content: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub observer_id: String,
+    pub observed_id: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub source_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvidenceToolCall {
     #[serde(rename = "tool_name")]
     pub tool_name: String,
+    #[serde(default)]
     #[serde(rename = "tool_input")]
     pub tool_input: serde_json::Map<String, serde_json::Value>,
+}
+
+/// One scope name, or a list of them. Chat accepts either.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ScopeNames {
+    One(String),
+    Many(Vec<String>),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -65,7 +88,7 @@ pub enum ReasoningLevel {
 pub struct DialecticOptions {
     pub session_id: Option<String>,
     pub filters: Option<serde_json::Map<String, serde_json::Value>>,
-    pub scope: Option<String>,
+    pub scope: Option<ScopeNames>,
     pub target: Option<String>,
     pub query: String,
     pub stream: Option<bool>,
@@ -78,6 +101,8 @@ pub struct DialecticOptions {
 #[derive(Debug, Clone)]
 pub struct StreamChunk {
     pub content: String,
+    pub done: bool,
+    pub evidence: Option<Evidence>,
 }
 
 pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;

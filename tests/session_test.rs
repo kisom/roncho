@@ -33,7 +33,7 @@ fn list_sessions_succeeds() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         server
-            .mock("GET", "/v3/workspaces/test-workspace/sessions")
+            .mock("POST", "/v3/workspaces/test-workspace/sessions/list")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(

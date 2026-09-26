@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("failed to get or create peer");
 
-    println!("Peer: {} ({})", peer.id, peer.display_name);
+    println!("Peer: {}", peer.id);
 
     let session = honcho
         .session("quickstart-session")
@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         include_evidence: None,
     };
 
-    let stream = peer.chat_stream(peer.id.clone(), Some(opts));
+    let stream = peer.chat_stream("What did I just say?", Some(opts));
     let mut pinned_stream = std::pin::pin!(stream);
     print!("Assistant: ");
     use futures::StreamExt;
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\nMessages in session:");
     for msg in &messages.items {
-        println!("  [{}] {}", msg.role, msg.content);
+        println!("  [{}] {}", msg.peer_id, msg.content);
     }
 
     Ok(())

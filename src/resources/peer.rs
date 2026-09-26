@@ -9,7 +9,7 @@ use crate::client::Honcho;
 use crate::error::Error;
 use crate::models::chat::{ChatResponse, DialecticOptions, StreamChunk};
 use crate::models::context::PeerContext;
-use crate::models::message::MessageCreate;
+use crate::models::message::{Message, MessageCreate, MessageSearch};
 use crate::models::page::{ListOptions, Page};
 
 /// A peer entity in Honcho — a user, agent, or any persistent identity.
@@ -17,7 +17,6 @@ use crate::models::page::{ListOptions, Page};
 pub struct Peer {
     pub(crate) client: Honcho,
     pub id: String,
-    pub display_name: String,
     pub(crate) created_at: DateTime<Utc>,
     pub metadata: serde_json::Map<String, serde_json::Value>,
     pub configuration: serde_json::Map<String, serde_json::Value>,
@@ -28,7 +27,6 @@ impl Peer {
         Self {
             client,
             id: model.id,
-            display_name: model.display_name,
             created_at: model.created_at,
             metadata: model.metadata,
             configuration: model.configuration,
@@ -46,7 +44,6 @@ impl Peer {
     pub fn to_model(&self) -> crate::models::peer::Peer {
         crate::models::peer::Peer {
             id: self.id.clone(),
-            display_name: self.display_name.clone(),
             workspace_id: self.client.workspace_id().to_string(),
             created_at: self.created_at,
             metadata: self.metadata.clone(),
@@ -114,10 +111,11 @@ impl Peer {
                 match result {
                     Ok(page_data) => {
                         let has_next = page_data.has_next();
+                        let empty = page_data.items.is_empty();
                         for session in page_data.items {
                             yield Ok(Session::from_model(client.clone(), session));
                         }
-                        if !has_next {
+                        if !has_next || empty {
                             break;
                         }
                         page += 1;
@@ -132,36 +130,53 @@ impl Peer {
     }
 
     /// Search messages attributed to this peer.
-    pub async fn search(
-        &self,
-        query: impl Into<String>,
-        _opts: &ListOptions,
-    ) -> Result<Page<crate::models::message::Message>, Error> {
-        peers_api::search_peer_messages(&self.client, &self.id, &query.into()).await
+    pub async fn search(&self, query: impl Into<String>) -> Result<Vec<Message>, Error> {
+        self.search_with(MessageSearch::new(query)).await
+    }
+
+    pub async fn search_with(&self, search: MessageSearch) -> Result<Vec<Message>, Error> {
+        peers_api::search_peer_messages(&self.client, &self.id, &search).await
     }
 
     /// Get the working representation of this peer, optionally about another peer.
     pub async fn context(
         &self,
         target: Option<&str>,
-        _opts: Option<PeerContextOptions>,
+        opts: Option<PeerContextOptions>,
     ) -> Result<PeerContext, Error> {
-        let path = if let Some(target) = target {
-            format!("peers/{}/context?target={}", self.id, target)
-        } else {
-            format!("peers/{}/context", self.id)
-        };
-        self.client.get_json(&path, &[]).await
+        let opts = opts.unwrap_or_default();
+        let mut query = Vec::new();
+        if let Some(target) = target {
+            query.push(("target", target.to_string()));
+        }
+        if let Some(search_query) = opts.search_query {
+            query.push(("search_query", search_query));
+        }
+        if let Some(search_top_k) = opts.search_top_k {
+            query.push(("search_top_k", search_top_k.to_string()));
+        }
+        if let Some(search_max_distance) = opts.search_max_distance {
+            query.push(("search_max_distance", search_max_distance.to_string()));
+        }
+        if let Some(include_most_frequent) = opts.include_most_frequent {
+            query.push(("include_most_frequent", include_most_frequent.to_string()));
+        }
+        if let Some(max_conclusions) = opts.max_conclusions {
+            query.push(("max_conclusions", max_conclusions.to_string()));
+        }
+        let path = format!("peers/{}/context", self.id);
+        self.client.get_json(&path, &query).await
     }
 
     /// Get the peer card for this peer (or about another peer).
     pub async fn get_card(&self, target: Option<&str>) -> Result<Vec<String>, Error> {
-        let path = if let Some(target) = target {
-            format!("peers/{}/card?target={}", self.id, target)
-        } else {
-            format!("peers/{}/card", self.id)
-        };
-        self.client.get_json::<Vec<String>>(&path, &[]).await
+        let mut query = Vec::new();
+        if let Some(target) = target {
+            query.push(("target", target.to_string()));
+        }
+        let path = format!("peers/{}/card", self.id);
+        let card: PeerCardResponse = self.client.get_json(&path, &query).await?;
+        Ok(card.peer_card.unwrap_or_default())
     }
 
     /// Set the peer card for this peer (or about another peer).
@@ -171,46 +186,55 @@ impl Peer {
         target: Option<&str>,
     ) -> Result<Vec<String>, Error> {
         let card_values: Vec<String> = card.iter().map(|s| s.as_ref().to_string()).collect();
-
-        let body = if let Some(target) = target {
-            serde_json::json!({ "target": target, "card": card_values })
-        } else {
-            serde_json::json!({ "card": card_values })
-        };
-
+        let mut query = Vec::new();
+        if let Some(target) = target {
+            query.push(("target", target.to_string()));
+        }
+        let body = serde_json::json!({ "peer_card": card_values });
         let path = format!("peers/{}/card", self.id);
-        self.client.post_json(&path, &body).await
+        let card: PeerCardResponse = self.client.put_json_query(&path, &query, &body).await?;
+        Ok(card.peer_card.unwrap_or_default())
     }
 
-    /// Access conclusions about this peer. List and query results are filtered
-    /// to conclusions where this peer is the observed peer.
+    /// Conclusions this peer holds about itself (`observer` and `observed` are this peer).
     pub fn conclusions(&self) -> crate::resources::conclusions::Conclusions {
-        let filters = serde_json::json!({ "observed_id": self.id })
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        self.conclusion_view(&self.id)
+    }
+
+    /// Conclusions this peer holds about `observed_id`.
+    pub fn conclusions_of(
+        &self,
+        observed_id: impl AsRef<str>,
+    ) -> crate::resources::conclusions::Conclusions {
+        self.conclusion_view(observed_id.as_ref())
+    }
+
+    fn conclusion_view(&self, observed_id: &str) -> crate::resources::conclusions::Conclusions {
+        let mut filters = serde_json::Map::new();
+        filters.insert(
+            "observer_id".into(),
+            serde_json::Value::String(self.id.clone()),
+        );
+        filters.insert(
+            "observed_id".into(),
+            serde_json::Value::String(observed_id.to_string()),
+        );
         crate::resources::conclusions::Conclusions::with_filters(self.client.clone(), filters)
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct PeerCardResponse {
+    peer_card: Option<Vec<String>>,
+}
+
+#[derive(Default)]
 pub struct PeerContextOptions {
     pub search_query: Option<String>,
     pub search_top_k: Option<u32>,
     pub search_max_distance: Option<f64>,
     pub include_most_frequent: Option<bool>,
     pub max_conclusions: Option<u32>,
-}
-
-impl Default for PeerContextOptions {
-    fn default() -> Self {
-        Self {
-            search_query: None,
-            search_top_k: None,
-            search_max_distance: None,
-            include_most_frequent: None,
-            max_conclusions: None,
-        }
-    }
 }
 
 // Re-export Session for use in return types

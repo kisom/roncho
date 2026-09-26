@@ -32,12 +32,6 @@ impl std::fmt::Debug for Honcho {
     }
 }
 
-impl Default for Honcho {
-    fn default() -> Self {
-        Self::new().expect("valid default config")
-    }
-}
-
 impl Honcho {
     pub fn new() -> Result<Self, Error> {
         Self::builder().build()
@@ -95,25 +89,16 @@ impl Honcho {
     ) -> Result<T, Error> {
         let url = self.url(path)?;
         let headers = self.headers()?;
-
         let resp = self
-            .http
-            .get(url)
-            .headers(headers)
-            .query(query)
-            .timeout(self.timeout)
-            .send()
+            .send(
+                self.http
+                    .get(url)
+                    .headers(headers)
+                    .query(query)
+                    .timeout(self.timeout),
+            )
             .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(parse_api_error(status, &text));
-        }
-
-        resp.json::<T>()
-            .await
-            .map_err(|e| Error::Decode(e.to_string()))
+        decode_json(resp).await
     }
 
     pub(crate) async fn post_json<T: serde::de::DeserializeOwned>(
@@ -121,27 +106,7 @@ impl Honcho {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<T, Error> {
-        let url = self.url(path)?;
-        let headers = self.headers()?;
-
-        let resp = self
-            .http
-            .post(url)
-            .headers(headers)
-            .json(body)
-            .timeout(self.timeout)
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(parse_api_error(status, &text));
-        }
-
-        resp.json::<T>()
-            .await
-            .map_err(|e| Error::Decode(e.to_string()))
+        self.post_json_query(path, &[], body).await
     }
 
     pub(crate) async fn post_json_query<T: serde::de::DeserializeOwned>(
@@ -152,78 +117,162 @@ impl Honcho {
     ) -> Result<T, Error> {
         let url = self.url(path)?;
         let headers = self.headers()?;
-
         let resp = self
-            .http
-            .post(url)
-            .headers(headers)
-            .query(query)
-            .json(body)
-            .timeout(self.timeout)
-            .send()
+            .send(
+                self.http
+                    .post(url)
+                    .headers(headers)
+                    .query(query)
+                    .json(body)
+                    .timeout(self.timeout),
+            )
             .await?;
+        decode_json(resp).await
+    }
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(parse_api_error(status, &text));
-        }
+    /// POST with a query string and no body. Clone uses this.
+    pub(crate) async fn post_query<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<T, Error> {
+        let url = self.url(path)?;
+        let headers = self.headers()?;
+        let resp = self
+            .send(
+                self.http
+                    .post(url)
+                    .headers(headers)
+                    .query(query)
+                    .timeout(self.timeout),
+            )
+            .await?;
+        decode_json(resp).await
+    }
 
-        resp.json::<T>()
-            .await
-            .map_err(|e| Error::Decode(e.to_string()))
+    pub(crate) async fn put_json_query<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<T, Error> {
+        let url = self.url(path)?;
+        let headers = self.headers()?;
+        let resp = self
+            .send(
+                self.http
+                    .put(url)
+                    .headers(headers)
+                    .query(query)
+                    .json(body)
+                    .timeout(self.timeout),
+            )
+            .await?;
+        decode_json(resp).await
     }
 
     pub(crate) async fn delete_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
     ) -> Result<T, Error> {
+        self.delete_json_body(path, None).await
+    }
+
+    pub(crate) async fn delete_json_body<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<T, Error> {
         let url = self.url(path)?;
         let headers = self.headers()?;
-
-        let resp = self
-            .http
-            .delete(url)
-            .headers(headers)
-            .timeout(self.timeout)
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(parse_api_error(status, &text));
+        let mut req = self.http.delete(url).headers(headers).timeout(self.timeout);
+        if let Some(body) = body {
+            req = req.json(body);
         }
+        let resp = self.send(req).await?;
+        decode_json(resp).await
+    }
 
-        let len = resp.content_length();
-        if len == Some(0) || len.is_none() {
-            return Ok(serde_json::from_str("{}").unwrap());
+    /// Streaming chat can outlive a normal JSON call. The configured timeout
+    /// still applies, but never shorter than five minutes.
+    pub(crate) fn stream_timeout(&self) -> Duration {
+        self.timeout.max(Duration::from_secs(300))
+    }
+
+    pub(crate) async fn send(
+        &self,
+        builder: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, Error> {
+        let req = builder.build()?;
+        self.send_retry(req).await
+    }
+
+    async fn send_retry(&self, req: reqwest::Request) -> Result<reqwest::Response, Error> {
+        let idempotent = matches!(
+            *req.method(),
+            reqwest::Method::GET
+                | reqwest::Method::PUT
+                | reqwest::Method::DELETE
+                | reqwest::Method::HEAD
+        );
+        let mut attempt = 0usize;
+        let mut current = req;
+        loop {
+            let next = current.try_clone();
+            match self.http.execute(current).await {
+                Ok(resp)
+                    if idempotent
+                        && attempt < self.max_retries
+                        && (resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+                            || resp.status().is_server_error()) =>
+                {
+                    let Some(cloned) = next else {
+                        return Ok(resp);
+                    };
+                    let _ = resp.bytes().await;
+                    attempt += 1;
+                    tokio::time::sleep(retry_delay(attempt)).await;
+                    current = cloned;
+                }
+                Ok(resp) => return Ok(resp),
+                Err(err) if err.is_connect() && attempt < self.max_retries => {
+                    let Some(cloned) = next else {
+                        return Err(err.into());
+                    };
+                    attempt += 1;
+                    tokio::time::sleep(retry_delay(attempt)).await;
+                    current = cloned;
+                }
+                Err(err) => return Err(err.into()),
+            }
         }
-
-        resp.json::<T>()
-            .await
-            .map_err(|e| Error::Decode(e.to_string()))
     }
 }
 
+async fn decode_json<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Result<T, Error> {
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(parse_api_error(status, &text));
+    }
+    let bytes = resp.bytes().await.map_err(Error::Http)?;
+    if bytes.is_empty() {
+        return serde_json::from_slice(b"{}").map_err(|e| Error::Decode(e.to_string()));
+    }
+    serde_json::from_slice(&bytes).map_err(|e| Error::Decode(e.to_string()))
+}
+
+fn retry_delay(attempt: usize) -> Duration {
+    Duration::from_millis(200u64.saturating_mul(1u64 << (attempt.min(5) - 1)))
+}
+
+#[derive(Default)]
 pub struct HonchoBuilder {
     workspace_id: Option<String>,
     api_key: Option<String>,
     base_url: Option<String>,
     max_retries: Option<usize>,
     timeout: Option<Duration>,
-}
-
-impl Default for HonchoBuilder {
-    fn default() -> Self {
-        Self {
-            workspace_id: None,
-            api_key: None,
-            base_url: None,
-            max_retries: None,
-            timeout: None,
-        }
-    }
 }
 
 impl HonchoBuilder {
@@ -247,21 +296,25 @@ impl HonchoBuilder {
         self
     }
 
+    /// Deadline for one JSON call, including the response body.
+    ///
+    /// Streaming chat uses this value, or five minutes, whichever is longer,
+    /// because a high reasoning level often outlasts a typical request.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
     pub fn build(self) -> Result<Honcho, Error> {
-        let workspace_id = self
-            .workspace_id
-            .or_else(|| std::env::var("HONCHO_WORKSPACE_ID").ok())
-            .ok_or(Error::MissingApiKey)?;
-
         let api_key = self
             .api_key
             .or_else(|| std::env::var("HONCHO_API_KEY").ok())
             .ok_or(Error::MissingApiKey)?;
+
+        let workspace_id = self
+            .workspace_id
+            .or_else(|| std::env::var("HONCHO_WORKSPACE_ID").ok())
+            .ok_or(Error::MissingWorkspaceId)?;
 
         let base_url_str = self
             .base_url
@@ -280,7 +333,10 @@ impl HonchoBuilder {
 
         let http = reqwest::Client::builder()
             .default_headers(headers)
-            .timeout(timeout)
+            .connect_timeout(Duration::from_secs(10))
+            // Per-request timeouts override this. The floor keeps a stream
+            // alive when the JSON deadline is shorter than a long chat.
+            .timeout(timeout.max(Duration::from_secs(300)))
             .build()
             .map_err(Error::Http)?;
 

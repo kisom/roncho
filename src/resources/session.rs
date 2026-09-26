@@ -8,7 +8,7 @@ use crate::api::sessions as sessions_api;
 use crate::client::Honcho;
 use crate::error::Error;
 use crate::models::context::SessionContext;
-use crate::models::message::{Message, MessageCreate};
+use crate::models::message::{Message, MessageCreate, MessageSearch};
 use crate::models::page::{ListOptions, Page};
 use crate::models::session::SessionPeerConfig;
 
@@ -116,10 +116,11 @@ impl Session {
                 match result {
                     Ok(page_data) => {
                         let has_next = page_data.has_next();
+                        let empty = page_data.items.is_empty();
                         for msg in page_data.items {
                             yield Ok(msg);
                         }
-                        if !has_next {
+                        if !has_next || empty {
                             break;
                         }
                         page += 1;
@@ -141,6 +142,8 @@ impl Session {
             summary: opts.summary,
             peer_target: opts.peer_target.clone(),
             peer_perspective: opts.peer_perspective.clone(),
+            scope: opts.scope.clone(),
+            sessions: opts.sessions.clone(),
             limit_to_session: opts.limit_to_session,
             search_top_k: opts.search_top_k,
             search_max_distance: opts.search_max_distance,
@@ -151,17 +154,17 @@ impl Session {
     }
 
     /// Search content within this session.
-    pub async fn search(
-        &self,
-        query: impl Into<String>,
-        _opts: &ListOptions,
-    ) -> Result<Page<Message>, Error> {
-        sessions_api::search_session(&self.client, &self.id, &query.into()).await
+    pub async fn search(&self, query: impl Into<String>) -> Result<Vec<Message>, Error> {
+        self.search_with(MessageSearch::new(query)).await
     }
 
-    /// Clone this session (optionally up to a specific message ID).
-    pub async fn clone(&self, up_to_message_id: Option<&str>) -> Result<Session, Error> {
-        let model = sessions_api::clone_session(&self.client, &self.id, up_to_message_id).await?;
+    pub async fn search_with(&self, search: MessageSearch) -> Result<Vec<Message>, Error> {
+        sessions_api::search_session(&self.client, &self.id, &search).await
+    }
+
+    /// Clone this session, optionally cutting off at `message_id`.
+    pub async fn clone(&self, message_id: Option<&str>) -> Result<Session, Error> {
+        let model = sessions_api::clone_session(&self.client, &self.id, message_id).await?;
         Ok(Session::from_model(self.client.clone(), model))
     }
 
@@ -179,6 +182,8 @@ pub struct SessionContextRequest {
     pub summary: Option<bool>,
     pub peer_target: Option<String>,
     pub peer_perspective: Option<String>,
+    pub scope: Option<String>,
+    pub sessions: Option<Vec<String>>,
     pub limit_to_session: Option<bool>,
     pub search_top_k: Option<u32>,
     pub search_max_distance: Option<f64>,

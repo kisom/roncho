@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +14,8 @@ pub struct SessionContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerContext {
+    pub peer_id: String,
+    pub target_id: String,
     #[serde(default)]
     pub representation: Option<String>,
     #[serde(default)]
@@ -28,7 +29,7 @@ pub struct Summary {
     pub message_id: String,
     #[serde(rename = "summary_type")]
     pub summary_type: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
     #[serde(default)]
     pub token_count: u32,
 }

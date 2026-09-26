@@ -62,7 +62,7 @@ pub fn build() -> Result<Honcho> {
 
 pub async fn cmd_config(mode: Mode) -> Result<()> {
     let file = load_file()?;
-    let resolved = Honcho::builder().build();
+    let resolved = build();
     let (workspace_id, base_url, api_key_present) = match &resolved {
         Ok(h) => (
             Some(h.workspace_id().to_string()),
@@ -70,9 +70,13 @@ pub async fn cmd_config(mode: Mode) -> Result<()> {
             true,
         ),
         Err(_) => (
-            file.workspace_id.clone(),
-            file.base_url.clone(),
-            file.api_key.is_some(),
+            file.workspace_id
+                .clone()
+                .or_else(|| std::env::var("HONCHO_WORKSPACE_ID").ok()),
+            file.base_url
+                .clone()
+                .or_else(|| std::env::var("HONCHO_BASE_URL").ok()),
+            file.api_key.is_some() || std::env::var_os("HONCHO_API_KEY").is_some(),
         ),
     };
     let api_key_source = if file.api_key.is_some() {

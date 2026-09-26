@@ -2,7 +2,6 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use futures::StreamExt;
 use roncho::models::chat::{DialecticOptions, ReasoningLevel};
-use roncho::models::message::Message;
 use roncho::models::page::{ListOptions, Page};
 use roncho::models::peer::Peer as PeerModel;
 use roncho::models::session::Session as SessionModel;
@@ -173,12 +172,12 @@ pub async fn run_workspace_chat(mode: &Mode, args: ChatArgs) -> Result<()> {
 
 pub async fn run_workspace_search(mode: &Mode, args: SearchArgs) -> Result<()> {
     let honcho = config::build()?;
-    let results: Page<Message> = honcho.search(args.query).await?;
-    format::page(*mode, &results, |m| {
+    let results: Vec<roncho::models::message::Message> = honcho.search(&args.query).await?;
+    format::rows(*mode, &results, |m| {
         format!(
-            "{}  [{}]  {}",
+            "{}  {}  {}",
             m.id,
-            m.role,
+            m.peer_id,
             format::truncate(&m.content, 100)
         )
     });
@@ -207,9 +206,7 @@ async fn cmd_get(honcho: &Honcho, id: &str, mode: Mode) -> Result<()> {
 
 async fn cmd_list(honcho: &Honcho, args: &PageArgs, mode: Mode) -> Result<()> {
     let page: Page<PeerModel> = honcho.peers(&args.to_list_options()).await?;
-    format::page(mode, &page, |p| {
-        format!("{}  {}  {}", p.id, p.display_name, p.workspace_id)
-    });
+    format::page(mode, &page, |p| format!("{}  {}", p.id, p.workspace_id));
     Ok(())
 }
 
@@ -222,12 +219,12 @@ async fn cmd_chat(honcho: &Honcho, id: &str, args: &ChatArgs, mode: Mode) -> Res
 
 async fn cmd_search(honcho: &Honcho, id: &str, query: &str, mode: Mode) -> Result<()> {
     let peer = honcho.peer(id).await?;
-    let results: Page<Message> = peer.search(query, &ListOptions::default()).await?;
-    format::page(mode, &results, |m| {
+    let results = peer.search(query).await?;
+    format::rows(mode, &results, |m| {
         format!(
-            "{}  [{}]  {}",
+            "{}  {}  {}",
             m.id,
-            m.role,
+            m.peer_id,
             format::truncate(&m.content, 100)
         )
     });
@@ -270,9 +267,8 @@ async fn cmd_card(honcho: &Honcho, id: &str, target: Option<&str>, mode: Mode) -
 
 fn format_peer(p: &Peer) -> String {
     let mut s = format!(
-        "id:        {}\ndisplay:   {}\nworkspace: {}\ncreated:   {}",
+        "id:        {}\nworkspace: {}\ncreated:   {}",
         p.id,
-        p.display_name,
         p.workspace_id(),
         p.created_at().format("%Y-%m-%dT%H:%M:%SZ")
     );

@@ -30,7 +30,7 @@ fn list_peers_succeeds() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         server
-            .mock("GET", "/v3/workspaces/test-workspace/peers")
+            .mock("POST", "/v3/workspaces/test-workspace/peers/list")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
@@ -101,7 +101,9 @@ fn peer_chat_stream_succeeds() {
             .mock("POST", "/v3/workspaces/test-workspace/peers/peer-1/chat")
             .with_status(200)
             .with_header("content-type", "text/event-stream")
-            .with_body("data: Hello\n\ndata: world\n\n")
+            .with_body(
+                "data: {\"delta\":{\"content\":\"Hello\"},\"done\":false}\n\ndata: {\"delta\":{\"content\":\" world\"},\"done\":false}\n\ndata: {\"done\":true}\n\n",
+            )
             .create();
 
         let client = make_client(&server.url());
@@ -142,7 +144,7 @@ fn peer_search_messages_succeeds() {
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
-                r#"{"items":[{"id":"msg-1","content":"Hello","role":"assistant","peer_id":"peer-1","session_id":"sess-1","workspace_id":"ws-1","created_at":"2024-01-01T00:00:00Z","metadata":{},"token_count":1}],"total":1,"page":1,"size":50,"pages":1}"#,
+                r#"[{"id":"msg-1","content":"Hello","peer_id":"peer-1","session_id":"sess-1","workspace_id":"ws-1","created_at":"2024-01-01T00:00:00Z","metadata":{},"token_count":1}]"#,
             )
             .create();
 
@@ -150,12 +152,12 @@ fn peer_search_messages_succeeds() {
         let peer = client.peer("peer-1").await.expect("failed to create peer");
 
         let page = peer
-            .search("Hello", &roncho::models::page::ListOptions::default())
+            .search("Hello")
             .await
             .expect("failed to search");
 
-        assert_eq!(page.items.len(), 1);
-        assert_eq!(page.items[0].content, "Hello");
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].content, "Hello");
     });
 }
 
@@ -177,7 +179,9 @@ fn peer_context_succeeds() {
             .mock("GET", "/v3/workspaces/test-workspace/peers/peer-1/context")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"representation":"peer-1","peer_card":[]}"#)
+            .with_body(
+                r#"{"peer_id":"peer-1","target_id":"peer-1","representation":"peer-1","peer_card":[]}"#,
+            )
             .create();
 
         let client = make_client(&server.url());

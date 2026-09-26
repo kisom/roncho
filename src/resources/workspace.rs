@@ -24,7 +24,10 @@ impl Workspaces {
         workspace_api::get_or_create_workspace(&self.client, &create).await
     }
 
-    /// Get a workspace by id.
+    /// Get or create a workspace by id.
+    ///
+    /// Honcho has no read-only workspace fetch. This posts to `/v3/workspaces`,
+    /// which returns the workspace and creates it when the id is new.
     pub async fn get(&self, workspace_id: impl Into<String>) -> Result<Workspace, Error> {
         workspace_api::get_workspace(&self.client, &workspace_id.into()).await
     }

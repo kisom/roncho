@@ -90,7 +90,16 @@ fn list_conclusions_applies_filters() {
                 "POST",
                 "/v3/workspaces/test-workspace/conclusions/list",
             )
-            .match_request(|req| req.body().ok().and_then(|b| std::str::from_utf8(b).ok()) == Some(r#"{"filters":{"observed_id":"peer-1"}}"#))
+            .match_request(|req| {
+                let Ok(bytes) = req.body() else {
+                    return false;
+                };
+                let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+                    return false;
+                };
+                value["filters"]["observer_id"] == "peer-1"
+                    && value["filters"]["observed_id"] == "peer-1"
+            })
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(

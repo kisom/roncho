@@ -1,13 +1,13 @@
 use std::pin::Pin;
 
-use async_stream::stream;
 use futures::Stream;
-use serde_json::json;
+use serde_json::{json, Value};
 
+use crate::api::sse;
 use crate::client::Honcho;
 use crate::error::Error;
-use crate::models::chat::{ChatResponse, DialecticOptions, ReasoningLevel, StreamChunk};
-use crate::models::message::Message;
+use crate::models::chat::{ChatResponse, DialecticOptions, ScopeNames, StreamChunk};
+use crate::models::message::{Message, MessageSearch};
 use crate::models::page::{ListOptions, Page};
 use crate::models::peer::{Peer, PeerCreate};
 use crate::models::session::Session;
@@ -19,7 +19,9 @@ pub async fn get_or_create_peer(client: &Honcho, create: &PeerCreate) -> Result<
 
 pub async fn list_peers(client: &Honcho, opts: &ListOptions) -> Result<Page<Peer>, Error> {
     let query = client.list_query_params(opts);
-    client.get_json("peers", &query).await
+    client
+        .post_json_query("peers/list", &query, &json!({}))
+        .await
 }
 
 pub async fn peer_chat(
@@ -27,26 +29,8 @@ pub async fn peer_chat(
     peer_id: &str,
     opts: &DialecticOptions,
 ) -> Result<ChatResponse, Error> {
-    let body = serde_json::json!({
-        "query": opts.query,
-        "session_id": opts.session_id,
-        "filters": opts.filters,
-        "target": opts.target,
-        "scope": opts.scope,
-        "stream": opts.stream.unwrap_or(false),
-        "reasoning_level": opts.reasoning_level.map(|l| match l {
-            ReasoningLevel::Minimal => "minimal",
-            ReasoningLevel::Low => "low",
-            ReasoningLevel::Medium => "medium",
-            ReasoningLevel::High => "high",
-            ReasoningLevel::Max => "max",
-        }),
-        "response_format": opts.response_format,
-        "include_evidence": opts.include_evidence,
-    });
-
     let path = format!("peers/{}/chat", peer_id);
-    client.post_json(&path, &body).await
+    client.post_json(&path, &peer_chat_body(opts)).await
 }
 
 pub fn peer_chat_stream(
@@ -55,126 +39,20 @@ pub fn peer_chat_stream(
     opts: DialecticOptions,
 ) -> Pin<Box<dyn Stream<Item = Result<StreamChunk, Error>> + Send>> {
     let path = format!("peers/{}/chat", peer_id);
-
     let url = match client.url(&path) {
-        Ok(u) => u,
-        Err(e) => {
-            return Box::pin(stream! {
-                yield Err(e);
-            });
-        }
+        Ok(url) => url,
+        Err(err) => return sse::failed(err),
     };
-
-    let headers = match client.headers() {
-        Ok(h) => h,
-        Err(e) => {
-            return Box::pin(stream! {
-                yield Err(e);
-            });
-        }
-    };
-
-    let body = serde_json::json!({
-        "query": opts.query,
-        "session_id": opts.session_id,
-        "filters": opts.filters,
-        "target": opts.target,
-        "scope": opts.scope,
-        "stream": true,
-        "reasoning_level": opts.reasoning_level.map(|l| match l {
-            ReasoningLevel::Minimal => "minimal",
-            ReasoningLevel::Low => "low",
-            ReasoningLevel::Medium => "medium",
-            ReasoningLevel::High => "high",
-            ReasoningLevel::Max => "max",
-        }),
-        "response_format": opts.response_format,
-        "include_evidence": opts.include_evidence,
-    });
-
-    let send_future = client.http.post(url).headers(headers).json(&body).send();
-
-    Box::pin(stream!({
-        let resp = match send_future.await {
-            Ok(r) => r,
-            Err(e) => {
-                yield Err(Error::Http(e));
-                return;
-            }
-        };
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            yield Err(crate::error::parse_api_error(status, &text));
-            return;
-        }
-
-        let mut bytes = std::pin::pin!(resp.bytes_stream());
-        use futures::StreamExt;
-
-        let mut event_data: Option<String> = None;
-
-        while let Some(chunk_result) = bytes.next().await {
-            let chunk = match chunk_result {
-                Ok(b) => b,
-                Err(e) => {
-                    yield Err(Error::Http(e));
-                    return;
-                }
-            };
-
-            let text = String::from_utf8_lossy(&chunk);
-
-            for line in text.lines() {
-                if line.is_empty() {
-                    if let Some(data) = event_data.take() {
-                        if !data.is_empty() {
-                            yield Ok(StreamChunk { content: data });
-                        }
-                    }
-                    continue;
-                }
-
-                if line.starts_with(":") {
-                    continue;
-                }
-
-                let parts: Vec<&str> = line.splitn(2, ": ").collect();
-                let field = parts.get(0).copied().unwrap_or("");
-                let value = parts.get(1).copied().unwrap_or("").trim_start();
-
-                match field {
-                    "data" => {
-                        event_data = Some(value.to_string());
-                    }
-                    "error" => {
-                        yield Err(Error::Stream(value.to_string()));
-                        return;
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        if let Some(data) = event_data {
-            if !data.is_empty() {
-                yield Ok(StreamChunk { content: data });
-            }
-        }
-    }))
+    sse::open_chat_stream(client, url, peer_chat_body(&opts))
 }
 
 pub async fn search_peer_messages(
     client: &Honcho,
     peer_id: &str,
-    query: &str,
-) -> Result<Page<Message>, Error> {
-    let body = json!({
-        "filters": { "query": query }
-    });
+    search: &MessageSearch,
+) -> Result<Vec<Message>, Error> {
     let path = format!("peers/{}/search", peer_id);
-    client.post_json(&path, &body).await
+    client.post_json(&path, &search_body(search, false)).await
 }
 
 pub async fn get_peer_sessions(
@@ -184,5 +62,97 @@ pub async fn get_peer_sessions(
 ) -> Result<Page<Session>, Error> {
     let query = client.list_query_params(opts);
     let path = format!("peers/{}/sessions", peer_id);
-    client.get_json(&path, &query).await
+    client.post_json_query(&path, &query, &json!({})).await
+}
+
+pub(crate) fn peer_chat_body(opts: &DialecticOptions) -> Value {
+    chat_body(opts, true)
+}
+
+pub(crate) fn workspace_chat_body(opts: &DialecticOptions) -> Result<Value, Error> {
+    if opts.target.is_some() || opts.filters.is_some() {
+        return Err(Error::Configuration(
+            "workspace chat has no target or filters; use session_id or scope".into(),
+        ));
+    }
+    Ok(chat_body(opts, false))
+}
+
+fn chat_body(opts: &DialecticOptions, include_peer_fields: bool) -> Value {
+    let mut body = serde_json::Map::new();
+    body.insert("query".into(), json!(opts.query));
+    insert_some(
+        &mut body,
+        "session_id",
+        opts.session_id.as_ref().map(json_str),
+    );
+    if let Some(stream) = opts.stream {
+        body.insert("stream".into(), json!(stream));
+    }
+    if let Some(level) = opts.reasoning_level {
+        body.insert(
+            "reasoning_level".into(),
+            json!(match level {
+                crate::models::chat::ReasoningLevel::Minimal => "minimal",
+                crate::models::chat::ReasoningLevel::Low => "low",
+                crate::models::chat::ReasoningLevel::Medium => "medium",
+                crate::models::chat::ReasoningLevel::High => "high",
+                crate::models::chat::ReasoningLevel::Max => "max",
+            }),
+        );
+    }
+    insert_some(
+        &mut body,
+        "response_format",
+        opts.response_format.clone().map(Value::Object),
+    );
+    if let Some(include) = opts.include_evidence {
+        body.insert("include_evidence".into(), json!(include));
+    }
+    if let Some(scope) = &opts.scope {
+        body.insert("scope".into(), scope_value(scope));
+    }
+    if include_peer_fields {
+        insert_some(
+            &mut body,
+            "filters",
+            opts.filters.clone().map(Value::Object),
+        );
+        insert_some(&mut body, "target", opts.target.as_ref().map(json_str));
+    }
+    Value::Object(body)
+}
+
+fn scope_value(scope: &ScopeNames) -> Value {
+    match scope {
+        ScopeNames::One(name) => json!(name),
+        ScopeNames::Many(names) => json!(names),
+    }
+}
+
+fn json_str(value: &String) -> Value {
+    json!(value)
+}
+
+fn insert_some(body: &mut serde_json::Map<String, Value>, key: &str, value: Option<Value>) {
+    if let Some(value) = value {
+        body.insert(key.to_string(), value);
+    }
+}
+
+pub(crate) fn search_body(search: &MessageSearch, include_scope: bool) -> Value {
+    let mut body = serde_json::Map::new();
+    body.insert("query".into(), json!(search.query));
+    if let Some(filters) = &search.filters {
+        body.insert("filters".into(), Value::Object(filters.clone()));
+    }
+    if let Some(limit) = search.limit {
+        body.insert("limit".into(), json!(limit));
+    }
+    if include_scope {
+        if let Some(scope) = &search.scope {
+            body.insert("scope".into(), json!(scope));
+        }
+    }
+    Value::Object(body)
 }

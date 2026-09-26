@@ -1,13 +1,13 @@
 use std::pin::Pin;
 
-use async_stream::stream;
 use futures::Stream;
-use serde_json::json;
 
+use crate::api::peers::{self, workspace_chat_body};
+use crate::api::sse;
 use crate::client::Honcho;
 use crate::error::{parse_api_error, Error};
-use crate::models::chat::{ChatResponse, DialecticOptions, ReasoningLevel, StreamChunk};
-use crate::models::message::Message;
+use crate::models::chat::{ChatResponse, DialecticOptions, StreamChunk};
+use crate::models::message::{Message, MessageSearch};
 use crate::models::page::{ListOptions, Page};
 use crate::models::workspace::{Workspace, WorkspaceCreate, WorkspaceListOptions, WorkspaceUpdate};
 
@@ -47,7 +47,7 @@ async fn request_json<T: serde::de::DeserializeOwned>(
         req = req.query(query);
     }
 
-    let resp = req.timeout(client.timeout).send().await?;
+    let resp = client.send(req.timeout(client.timeout)).await?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -57,9 +57,7 @@ async fn request_json<T: serde::de::DeserializeOwned>(
 
     let bytes = resp.bytes().await?;
     if bytes.is_empty() {
-        // 204 No Content (e.g. delete) — decode as an empty object so callers
-        // can ignore the response body.
-        return serde_json::from_str::<T>("{}").map_err(|e| Error::Decode(e.to_string()));
+        return serde_json::from_slice::<T>(b"{}").map_err(|e| Error::Decode(e.to_string()));
     }
 
     serde_json::from_slice::<T>(&bytes).map_err(|e| Error::Decode(e.to_string()))
@@ -94,8 +92,11 @@ pub async fn list_workspaces(
     .await
 }
 
+/// The API has no GET for a workspace. Reading is get-or-create on
+/// `POST /v3/workspaces`, which creates the workspace when it is missing.
 pub async fn get_workspace(client: &Honcho, workspace_id: &str) -> Result<Workspace, Error> {
-    request_json(client, workspace_id, reqwest::Method::GET, None, None).await
+    let body = serde_json::json!({ "id": workspace_id });
+    request_json(client, "", reqwest::Method::POST, None, Some(&body)).await
 }
 
 pub async fn update_workspace(
@@ -120,145 +121,33 @@ pub async fn delete_workspace(client: &Honcho, workspace_id: &str) -> Result<(),
     Ok(())
 }
 
-pub async fn search_workspace(client: &Honcho, query: &str) -> Result<Page<Message>, Error> {
-    let body = json!({ "query": query });
-    client.post_json("search", &body).await
+pub async fn search_workspace(
+    client: &Honcho,
+    search: &MessageSearch,
+) -> Result<Vec<Message>, Error> {
+    client
+        .post_json("search", &peers::search_body(search, true))
+        .await
 }
 
 pub async fn chat_workspace(
     client: &Honcho,
     opts: &DialecticOptions,
 ) -> Result<ChatResponse, Error> {
-    let body = serde_json::json!({
-        "query": opts.query,
-        "session_id": opts.session_id,
-        "filters": opts.filters,
-        "target": opts.target,
-        "scope": opts.scope,
-        "stream": opts.stream.unwrap_or(false),
-        "reasoning_level": opts.reasoning_level.map(|l| match l {
-            ReasoningLevel::Minimal => "minimal",
-            ReasoningLevel::Low => "low",
-            ReasoningLevel::Medium => "medium",
-            ReasoningLevel::High => "high",
-            ReasoningLevel::Max => "max",
-        }),
-        "response_format": opts.response_format,
-        "include_evidence": opts.include_evidence,
-    });
-
-    client.post_json("chat", &body).await
+    client.post_json("chat", &workspace_chat_body(opts)?).await
 }
 
 pub fn chat_workspace_stream(
     client: Honcho,
     opts: DialecticOptions,
 ) -> Pin<Box<dyn Stream<Item = Result<StreamChunk, Error>> + Send>> {
+    let body = match workspace_chat_body(&opts) {
+        Ok(body) => body,
+        Err(err) => return sse::failed(err),
+    };
     let url = match client.url("chat") {
-        Ok(u) => u,
-        Err(e) => {
-            return Box::pin(stream! {
-                yield Err(e);
-            });
-        }
+        Ok(url) => url,
+        Err(err) => return sse::failed(err),
     };
-
-    let headers = match client.headers() {
-        Ok(h) => h,
-        Err(e) => {
-            return Box::pin(stream! {
-                yield Err(e);
-            });
-        }
-    };
-
-    let body = serde_json::json!({
-        "query": opts.query,
-        "session_id": opts.session_id,
-        "filters": opts.filters,
-        "target": opts.target,
-        "scope": opts.scope,
-        "stream": true,
-        "reasoning_level": opts.reasoning_level.map(|l| match l {
-            ReasoningLevel::Minimal => "minimal",
-            ReasoningLevel::Low => "low",
-            ReasoningLevel::Medium => "medium",
-            ReasoningLevel::High => "high",
-            ReasoningLevel::Max => "max",
-        }),
-        "response_format": opts.response_format,
-        "include_evidence": opts.include_evidence,
-    });
-
-    let send_future = client.http.post(url).headers(headers).json(&body).send();
-
-    Box::pin(stream!({
-        let resp = match send_future.await {
-            Ok(r) => r,
-            Err(e) => {
-                yield Err(Error::Http(e));
-                return;
-            }
-        };
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            yield Err(crate::error::parse_api_error(status, &text));
-            return;
-        }
-
-        let mut bytes = std::pin::pin!(resp.bytes_stream());
-        use futures::StreamExt;
-
-        let mut event_data: Option<String> = None;
-
-        while let Some(chunk_result) = bytes.next().await {
-            let chunk = match chunk_result {
-                Ok(b) => b,
-                Err(e) => {
-                    yield Err(Error::Http(e));
-                    return;
-                }
-            };
-
-            let text = String::from_utf8_lossy(&chunk);
-
-            for line in text.lines() {
-                if line.is_empty() {
-                    if let Some(data) = event_data.take() {
-                        if !data.is_empty() {
-                            yield Ok(StreamChunk { content: data });
-                        }
-                    }
-                    continue;
-                }
-
-                if line.starts_with(":") {
-                    continue;
-                }
-
-                let parts: Vec<&str> = line.splitn(2, ": ").collect();
-                let field = parts.first().copied().unwrap_or("");
-                let value = parts.get(1).copied().unwrap_or("").trim_start();
-
-                match field {
-                    "data" => {
-                        event_data = Some(value.to_string());
-                    }
-                    "error" => {
-                        yield Err(Error::Stream(value.to_string()));
-                        return;
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        if let Some(data) = event_data {
-            if !data.is_empty() {
-                yield Ok(StreamChunk { content: data });
-            }
-        }
-    }))
+    sse::open_chat_stream(client, url, body)
 }

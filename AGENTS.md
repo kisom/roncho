@@ -5,14 +5,14 @@ Rust SDK for [Honcho](https://honcho.dev), the persistent, reasoning-based memor
 ## Commands
 
 ```bash
-cargo build          # compile the library (currently builds with 1 warning in src/api/sessions.rs)
+cargo build          # compile the library
 cargo test           # run the test suite (integration tests under tests/, mockito-based)
 cargo fmt            # format with rustfmt
 cargo clippy         # lint
 cargo run --example quickstart   # run the quickstart example (needs real Honcho credentials)
 ```
 
-`cargo test` currently does **not** pass — the integration test files have compile errors (work in progress). Fix those before declaring related work done.
+`cargo test` is the gate for SDK changes. Integration tests live under `tests/` and mock Honcho with `mockito`. Keep those mocks on the live v3 contract in `SPEC.md`, not on an earlier guess.
 
 ## Tech Stack
 

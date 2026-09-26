@@ -57,7 +57,9 @@ fn peer_context_with_target_succeeds() {
             .match_query(mockito::Matcher::Regex("target=peer-2".to_string()))
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"representation":"peer-1","peer_card":[]}"#)
+            .with_body(
+                r#"{"peer_id":"peer-1","target_id":"peer-2","representation":"peer-1","peer_card":[]}"#,
+            )
             .create();
 
         let client = make_client(&server.url());

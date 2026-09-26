@@ -13,6 +13,20 @@ pub fn emit<T: serde::Serialize>(mode: Mode, human: &str, json: &T) {
     }
 }
 
+pub fn rows<T, F>(mode: Mode, rows: &[T], render: F)
+where
+    T: serde::Serialize,
+    F: Fn(&T) -> String,
+{
+    let lines: Vec<String> = rows.iter().map(render).collect();
+    let body = if lines.is_empty() {
+        "(no items)".to_string()
+    } else {
+        lines.join("\n")
+    };
+    emit(mode, &body, &rows);
+}
+
 pub fn page<T, F>(mode: Mode, page: &Page<T>, render: F)
 where
     T: serde::Serialize,

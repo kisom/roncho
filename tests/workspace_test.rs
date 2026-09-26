@@ -53,7 +53,13 @@ fn get_workspace_hits_root_url() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         server
-            .mock("GET", "/v3/workspaces/ws-1")
+            .mock("POST", "/v3/workspaces")
+            .match_request(|req| {
+                req.body()
+                    .ok()
+                    .and_then(|b| std::str::from_utf8(b).ok())
+                    .is_some_and(|body| body.contains("\"id\":\"ws-1\""))
+            })
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(workspace_body("ws-1"))

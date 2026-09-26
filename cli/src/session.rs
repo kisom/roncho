@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use roncho::models::context::SessionContext;
 use roncho::models::message::Message;
-use roncho::models::page::{ListOptions, Page};
+use roncho::models::page::Page;
 use roncho::models::session::{Session as SessionModel, SessionPeerConfig};
 use roncho::resources::session::{Session, SessionContextRequest};
 use roncho::Honcho;
@@ -134,9 +134,9 @@ async fn cmd_add(
     let created: Vec<Message> = session.add_messages(&[message]).await?;
     format::page(mode, &page_of(created), |m| {
         format!(
-            "{}  [{}]  {}",
+            "{}  {}  {}",
             m.id,
-            m.role,
+            m.peer_id,
             format::truncate(&m.content, 100)
         )
     });
@@ -161,9 +161,9 @@ async fn cmd_messages(
     let results: Page<Message> = session.messages(&args.to_list_options(), parsed).await?;
     format::page(mode, &results, |m| {
         format!(
-            "{}  [{}]  {}",
+            "{}  {}  {}",
             m.id,
-            m.role,
+            m.peer_id,
             format::truncate(&m.content, 100)
         )
     });
@@ -172,12 +172,12 @@ async fn cmd_messages(
 
 async fn cmd_search(honcho: &Honcho, id: &str, query: &str, mode: Mode) -> Result<()> {
     let session = honcho.session(id).await?;
-    let results: Page<Message> = session.search(query, &ListOptions::default()).await?;
-    format::page(mode, &results, |m| {
+    let results = session.search(query).await?;
+    format::rows(mode, &results, |m| {
         format!(
-            "{}  [{}]  {}",
+            "{}  {}  {}",
             m.id,
-            m.role,
+            m.peer_id,
             format::truncate(&m.content, 100)
         )
     });
@@ -326,7 +326,7 @@ fn format_context(c: &SessionContext) -> String {
     for m in &c.messages {
         out.push_str(&format!(
             "  [{}] {}\n",
-            m.role,
+            m.peer_id,
             format::truncate(&m.content, 120)
         ));
     }

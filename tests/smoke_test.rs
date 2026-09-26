@@ -1,3 +1,5 @@
+#![allow(clippy::duplicate_mod)]
+
 #[path = "client_test.rs"]
 mod client_test;
 #[path = "conclusions_test.rs"]

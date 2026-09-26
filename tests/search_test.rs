@@ -13,7 +13,7 @@ fn workspace_search_succeeds() {
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
-                r#"{"items":[{"id":"msg-1","content":"Hello","role":"assistant","peer_id":"peer-1","session_id":"sess-1","workspace_id":"ws-1","created_at":"2024-01-01T00:00:00Z","metadata":{},"token_count":1}],"total":1,"page":1,"size":50,"pages":1}"#,
+                r#"[{"id":"msg-1","content":"Hello","peer_id":"peer-1","session_id":"sess-1","workspace_id":"ws-1","created_at":"2024-01-01T00:00:00Z","metadata":{},"token_count":1}]"#,
             )
             .create();
 
@@ -23,8 +23,8 @@ fn workspace_search_succeeds() {
             .await
             .expect("failed to search");
 
-        assert_eq!(page.items.len(), 1);
-        assert_eq!(page.items[0].content, "Hello");
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].content, "Hello");
     });
 }
 
@@ -56,7 +56,9 @@ fn workspace_chat_stream_succeeds() {
             .mock("POST", "/v3/workspaces/test-workspace/chat")
             .with_status(200)
             .with_header("content-type", "text/event-stream")
-            .with_body("data: Hi there\n\ndata: !\n\n")
+            .with_body(
+                "data: {\"delta\":{\"content\":\"Hi there\"},\"done\":false}\n\ndata: {\"delta\":{\"content\":\"!\"},\"done\":false}\n\ndata: {\"done\":true}\n\n",
+            )
             .create();
 
         let client = make_client(&server.url());

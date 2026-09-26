@@ -175,9 +175,4 @@ See `AGENTS.md` for project conventions and `SPEC.md` for the full API contract.
 
 ## Roadmap
 
-Near-term goals for `roncho`:
-
-- Complete support for the **Conclusions API**.
-- Build a **CLI tool** on top of the SDK.
-
-See `SPEC.md` for the full scope and future milestones.
+Still out of scope: first-class scopes, file uploads, webhooks, and a blocking API. See `SPEC.md`.

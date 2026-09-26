@@ -2,19 +2,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Reasoning level at which a conclusion was produced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
+    #[default]
     Explicit,
     Deductive,
     Inductive,
     Contradiction,
-}
-
-impl Default for Level {
-    fn default() -> Self {
-        Level::Explicit
-    }
 }
 
 fn default_times_derived() -> u64 {

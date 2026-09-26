@@ -91,8 +91,16 @@ impl Honcho {
     pub async fn search(
         &self,
         query: impl Into<String>,
-    ) -> Result<Page<crate::models::message::Message>, Error> {
-        workspace::search_workspace(self, &query.into()).await
+    ) -> Result<Vec<crate::models::message::Message>, Error> {
+        self.search_with(crate::models::message::MessageSearch::new(query))
+            .await
+    }
+
+    pub async fn search_with(
+        &self,
+        search: crate::models::message::MessageSearch,
+    ) -> Result<Vec<crate::models::message::Message>, Error> {
+        workspace::search_workspace(self, &search).await
     }
 
     /// Ask a question across every peer in the workspace.

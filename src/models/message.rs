@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub struct Message {
     pub id: String,
     pub content: String,
-    pub role: String,
     pub peer_id: String,
     pub session_id: String,
     pub workspace_id: String,
@@ -50,5 +49,25 @@ impl MessageCreate {
     pub fn with_created_at(mut self, created_at: DateTime<Utc>) -> Self {
         self.created_at = Some(created_at);
         self
+    }
+}
+
+/// Body for message search. `scope` is only sent on workspace search.
+#[derive(Debug, Clone)]
+pub struct MessageSearch {
+    pub query: String,
+    pub filters: Option<serde_json::Map<String, serde_json::Value>>,
+    pub limit: Option<u32>,
+    pub scope: Option<String>,
+}
+
+impl MessageSearch {
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            filters: None,
+            limit: None,
+            scope: None,
+        }
     }
 }

@@ -22,6 +22,9 @@ pub enum Error {
     #[error("API key is required — set HONCHO_API_KEY or pass it explicitly")]
     MissingApiKey,
 
+    #[error("workspace id is required — set HONCHO_WORKSPACE_ID or pass it explicitly")]
+    MissingWorkspaceId,
+
     #[error("configuration error: {0}")]
     Configuration(String),
 

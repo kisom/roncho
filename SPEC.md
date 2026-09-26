@@ -25,13 +25,14 @@ This milestone covers the core primitives an agent needs to:
 - Pagination support (iterators + manual page access)
 - Streaming support for chat endpoints (via `futures` + `async-stream`)
 - Metadata and filtering
-- Workspaces API: get-or-create, list (reverse/page/size), get, update, delete — root-scoped `/v3/workspaces`
+- Workspaces API: get-or-create (`POST /v3/workspaces`; there is no GET-by-id), list, update, delete — root-scoped `/v3/workspaces`
+- Conclusions API: create, list, query, get, delete
+- Peer cards and peer context
+- Streaming chat (`text/event-stream` of `delta` / `done` events)
 
 ### Out of Scope (Future Milestones)
 
-- Conclusions API (create/list/query/delete)
-- Peer cards (get/set)
-- Scopes
+- Scopes as a first-class resource (chat and search can still pass a scope name)
 - File uploads
 - Webhooks
 - Dreaming / queue status
@@ -43,7 +44,7 @@ This milestone covers the core primitives an agent needs to:
 |-------------------|------------------------------------------------------|
 | `serde`           | Serialize/deserialize API payloads                   |
 | `serde_json`      | JSON value handling for metadata                     |
-| `reqwest`         | HTTP client (with async + default-tls features)      |
+| `reqwest`         | HTTP client (`rustls-tls`, default features off)     |
 | `url`             | Base URL construction                                |
 | `uuid`            | UUID generation for client-side IDs                  |
 | `chrono`          | Timestamp parsing (DateTime<Utc>)                    |
@@ -131,7 +132,8 @@ Methods:
 - `peer.chat_stream(query, opts) -> ChatStream`
 - `peer.message(content, meta, created_at) -> MessageCreate`  (builder)
 - `peer.sessions() -> PaginatedIter<Session>`
-- `peer.search(query, opts) -> PaginatedIter<Message>`
+- `peer.search(query) -> Vec<Message>`
+- `peer.conclusions()` / `peer.conclusions_of(observed)`
 - `peer.get_card(target) -> Vec<String>`
 - `peer.set_card(card, target) -> Vec<String>`
 - `peer.context(target, opts) -> PeerContext`
@@ -211,26 +213,36 @@ Supports iteration via `PaginatedIter` which auto-fetches subsequent pages.
 | Method | Path                                              | Purpose             |
 |--------|---------------------------------------------------|---------------------|
 | POST   | `/v3/workspaces/{ws}/peers`                        | Get or create peer  |
-| GET    | `/v3/workspaces/{ws}/peers`                        | List peers          |
+| POST   | `/v3/workspaces/{ws}/peers/list`                   | List peers          |
 | POST   | `/v3/workspaces/{ws}/peers/{peer}/chat`            | Peer chat           |
-| POST   | `/v3/workspaces/{ws}/peers/{peer}/search`          | Search peer messages|
-| POST   | `/v3/workspaces/{ws}/peers/{peer}/context`         | Get peer context    |
-| POST   | `/v3/workspaces/{ws}/sessions`                      | Get or create session|
-| GET    | `/v3/workspaces/{ws}/sessions`                      | List sessions       |
-| POST   | `/v3/workspaces/{ws}/sessions/{session}/messages`  | Create messages     |
-| POST   | `/v3/workspaces/{ws}/sessions/{session}/messages/list` | Get messages    |
+| POST   | `/v3/workspaces/{ws}/peers/{peer}/search`          | Search peer messages (returns `Message[]`) |
+| GET    | `/v3/workspaces/{ws}/peers/{peer}/context`         | Get peer context    |
+| GET    | `/v3/workspaces/{ws}/peers/{peer}/card`            | Get peer card       |
+| PUT    | `/v3/workspaces/{ws}/peers/{peer}/card`            | Set peer card       |
+| POST   | `/v3/workspaces/{ws}/peers/{peer}/sessions`        | List a peer's sessions |
+| POST   | `/v3/workspaces/{ws}/sessions`                     | Get or create session |
+| POST   | `/v3/workspaces/{ws}/sessions/list`                | List sessions       |
+| POST   | `/v3/workspaces/{ws}/sessions/{session}/messages`  | Create messages (201) |
+| POST   | `/v3/workspaces/{ws}/sessions/{session}/messages/list` | List messages (`page`/`size`/`reverse` are query params) |
 | GET    | `/v3/workspaces/{ws}/sessions/{session}/context`   | Get session context |
+| POST   | `/v3/workspaces/{ws}/sessions/{session}/peers`     | Add peers (body is the peer map) |
+| PUT    | `/v3/workspaces/{ws}/sessions/{session}/peers`     | Replace peers       |
+| DELETE | `/v3/workspaces/{ws}/sessions/{session}/peers`     | Remove peers (JSON array body) |
+| GET    | `/v3/workspaces/{ws}/sessions/{session}/peers`     | List session peers (`Page[Peer]`) |
+| POST   | `/v3/workspaces/{ws}/sessions/{session}/clone`     | Clone (`message_id` query) |
 | POST   | `/v3/workspaces/{ws}/chat`                         | Workspace chat      |
-| POST   | `/v3/workspaces/{ws}/search`                       | Search workspace    |
+| POST   | `/v3/workspaces/{ws}/search`                       | Search workspace (`Message[]`) |
+| POST   | `/v3/workspaces/{ws}/conclusions`                  | Create conclusions  |
+| POST   | `/v3/workspaces/{ws}/conclusions/list`             | List conclusions    |
+| POST   | `/v3/workspaces/{ws}/conclusions/query`            | Query conclusions   |
 | POST   | `/v3/workspaces`                                   | Get or create workspace |
 | POST   | `/v3/workspaces/list`                              | List workspaces     |
-| GET    | `/v3/workspaces/{workspace}`                       | Get workspace       |
 | PUT    | `/v3/workspaces/{workspace}`                       | Update workspace    |
-| DELETE | `/v3/workspaces/{workspace}`                       | Delete workspace    |
+| DELETE | `/v3/workspaces/{workspace}`                       | Delete workspace (202) |
 
 > Note: The Workspaces API is root-scoped — the workspace is resolved from the JWT, not a `{ws}` path segment, so requests target `/v3/workspaces`, `/v3/workspaces/list`, and `/v3/workspaces/{id}`.
 
-> Note: The API uses POST for some "list" operations (e.g., get messages, list peers, list workspaces) because it carries filter bodies. See individual endpoint docs.
+> List routes are POST `.../list` (or POST `.../peers/{id}/sessions`) with `page`, `size`, and `reverse` on the query string. Search routes return a bare array and take `limit`, not a page.
 
 ## Environment Variables
 
@@ -247,6 +259,7 @@ pub enum Error {
     Decode(String),      // JSON deserialization error
     InvalidUrl(String),
     MissingApiKey,
+    MissingWorkspaceId,
     Configuration(String),
 }
 ```
@@ -262,13 +275,11 @@ Uses `thiserror` for `Display` + `std::error::Error`. No fallible constructors; 
 
 ## Future Milestones
 
-1. **Conclusions API** — Query derived knowledge about peers
-2. **Peer Cards** — Stable biographical facts
-3. **Scopes** — Session visibility boundaries
-4. **Streaming chat** — SSE-based streaming responses
-5. **Sync wrappers** — Blocking convenience layer via `tokio` runtime
-6. **File uploads** — PDF/text ingestion
+1. **Scopes** — first-class scope resources
+2. **Sync wrappers** — blocking convenience layer
+3. **File uploads** — PDF/text ingestion
+4. **Webhooks, dreaming, and queue status**
 
 ## Compatibility
 
-Targets Honcho API v3 (version 3.2.1 per OpenAPI spec). API version is pinned in the client and validated against workspace compatibility.
+Shaped against Honcho OpenAPI 3.2.1 (`https://honcho.dev/docs/v3/openapi.json`). The client does not send or check an API version header.

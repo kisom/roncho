@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Peer {
     pub id: String,
-    pub display_name: String,
     pub workspace_id: String,
     pub created_at: DateTime<Utc>,
     #[serde(default)]

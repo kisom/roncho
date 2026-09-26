@@ -22,6 +22,7 @@ fn session_messages_stream_succeeds() {
                 "POST",
                 "/v3/workspaces/test-workspace/sessions/sess-1/messages/list",
             )
+            .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
@@ -64,7 +65,7 @@ fn peer_sessions_stream_succeeds() {
             .create();
 
         server
-            .mock("GET", "/v3/workspaces/test-workspace/peers/peer-1/sessions")
+            .mock("POST", "/v3/workspaces/test-workspace/peers/peer-1/sessions")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_header("content-type", "application/json")

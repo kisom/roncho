@@ -9,7 +9,8 @@ use crate::models::page::Page;
 /// Handle for the workspace-level Conclusions API.
 ///
 /// Obtain one from `honcho.conclusions()`, or a peer-scoped one from
-/// `peer.conclusions()` (which filters by `observed_id`).
+/// `peer.conclusions()` / `peer.conclusions_of()`. Scoped filters are merged
+/// into list and query calls and are not replaced by caller filters.
 #[derive(Debug, Clone)]
 pub struct Conclusions {
     client: Honcho,
@@ -42,9 +43,7 @@ impl Conclusions {
     /// List conclusions, ordered by recency unless `reverse` is set.
     pub async fn list(&self, opts: ConclusionListOptions) -> Result<Page<Conclusion>, Error> {
         let mut opts = opts;
-        if self.filters.is_some() && opts.filters.is_none() {
-            opts.filters = self.filters.clone();
-        }
+        opts.filters = merge_scope(self.filters.as_ref(), opts.filters.as_ref());
         conclusions_api::list_conclusions(&self.client, &opts).await
     }
 
@@ -56,9 +55,7 @@ impl Conclusions {
     ) -> Result<Vec<Conclusion>, Error> {
         let mut opts = ConclusionQuery::new(query);
         opts.top_k = top_k;
-        if self.filters.is_some() && opts.filters.is_none() {
-            opts.filters = self.filters.clone();
-        }
+        opts.filters = merge_scope(self.filters.as_ref(), opts.filters.as_ref());
         conclusions_api::query_conclusions(&self.client, &opts).await
     }
 
@@ -70,5 +67,24 @@ impl Conclusions {
     /// Delete a single conclusion by ID.
     pub async fn delete(&self, conclusion_id: &str) -> Result<(), Error> {
         conclusions_api::delete_conclusion(&self.client, conclusion_id).await
+    }
+}
+
+/// Scope keys win. A caller filter cannot widen the view by replacing them.
+fn merge_scope(
+    scope: Option<&serde_json::Map<String, serde_json::Value>>,
+    caller: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    match (scope, caller) {
+        (None, None) => None,
+        (Some(scope), None) => Some(scope.clone()),
+        (None, Some(caller)) => Some(caller.clone()),
+        (Some(scope), Some(caller)) => {
+            let mut merged = caller.clone();
+            for (key, value) in scope {
+                merged.insert(key.clone(), value.clone());
+            }
+            Some(merged)
+        }
     }
 }
