@@ -121,7 +121,11 @@ fn dial(endpoint: &Endpoint<'_>) -> Result<Conn, Error> {
         .map_err(Error::Io)?;
     #[cfg(feature = "tls")]
     if let Some(config) = endpoint.tls {
-        return Ok(Conn::Tls(Box::new(tls::wrap(stream, endpoint.host, config)?)));
+        return Ok(Conn::Tls(Box::new(tls::wrap(
+            stream,
+            endpoint.host,
+            config,
+        )?)));
     }
     Ok(Conn::Plain(stream))
 }
