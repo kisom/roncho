@@ -39,7 +39,10 @@ pub use models::message::{Message, MessageCreate, MessageSearch};
 pub use models::page::{ListOptions, Page};
 pub use models::peer::PeerCreate;
 pub use models::session::{SessionCreate, SessionPeerConfig};
-pub use models::workspace::{Workspace, WorkspaceCreate, WorkspaceListOptions, WorkspaceUpdate};
+pub use models::workspace::{
+    QueueStatus, QueueStatusQuery, Workspace, WorkspaceCreate, WorkspaceListOptions,
+    WorkspaceUpdate,
+};
 
 // Include the resource accessor methods on Honcho
 #[cfg(feature = "async")]

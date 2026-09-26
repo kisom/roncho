@@ -1,7 +1,10 @@
 use std::fmt;
 
 /// Failure from the blocking client. The API key is never included.
+///
+/// `non_exhaustive` so later variants (a refused key, for example) are not a breaking change.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// TCP connect failed.
     Connect(std::io::Error),
@@ -13,6 +16,8 @@ pub enum Error {
     Redirect { status: u16 },
     /// An HTTP status outside 2xx, with at most the first 4 KiB of the body.
     Status { status: u16, body: String },
+    /// The server refused the key. 401 and 403 only; the body is not kept.
+    Unauthorized { status: u16 },
     /// `DELETE` workspace returned 409 because sessions are still active.
     ActiveSessions { body: String },
     /// The response exceeded the configured body cap. Reading stopped there.
@@ -35,6 +40,9 @@ impl fmt::Display for Error {
             Error::Closed => write!(f, "the server closed the connection"),
             Error::Redirect { status } => write!(f, "refusing redirect (HTTP {status})"),
             Error::Status { status, body } => write!(f, "HTTP {status}: {body}"),
+            Error::Unauthorized { status } => {
+                write!(f, "the API key was refused (HTTP {status})")
+            }
             Error::ActiveSessions { body } => {
                 write!(f, "workspace still has active sessions: {body}")
             }

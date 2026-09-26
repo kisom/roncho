@@ -44,13 +44,12 @@ This milestone covers the core primitives an agent needs to:
 |-------------------|------------------------------------------------------|
 | `serde`           | Serialize/deserialize API payloads                   |
 | `serde_json`      | JSON value handling for metadata                     |
-| `reqwest`         | HTTP client (`rustls-tls`, default features off)     |
-| `url`             | Base URL construction                                |
-| `uuid`            | UUID generation for client-side IDs                  |
-| `chrono`          | Timestamp parsing (DateTime<Utc>)                    |
+| `reqwest`         | Async HTTP client (`rustls-tls`, feature `async`)    |
+| `url`             | Async base URL construction (feature `async`)        |
 | `thiserror`       | Ergonomic error types                                |
-| `async-stream`    | Async iterators for pagination and streaming         |
-| `futures`         | Async iterator traits                                |
+| `zeroize`         | Wipes an API key when the client is dropped          |
+| `async-stream`    | Async iterators (feature `async`)                    |
+| `futures`         | Async iterator traits (feature `async`)              |
 | `tokio`           | Async runtime (dev-dependency for tests)             |
 | `mockito`         | HTTP mocking for tests                               |
 
@@ -85,7 +84,7 @@ src/
 - **Models** are plain `serde` structs matching the API JSON shapes (snake_case, derived `Deserialize`/`Serialize`).
 - **Resources** (Peer, Session) are runtime objects that hold a reference to the client + their own identity, and expose ergonomic methods. They mirror the Python/TypeScript SDK's pattern where `honcho.peer("alice")` returns an object you can call `.chat()` on directly.
 - **API modules** contain the raw HTTP call functions. Resources delegate to these.
-- **Async throughout.** All I/O methods are `async`. No blocking wrappers in this milestone.
+- **Async client by default, blocking client behind `features = ["blocking"]`.** `default-features = false` builds only the blocking client. Timestamps are strings. `chrono` and `uuid` are not dependencies.
 
 ## Data Model
 
@@ -246,7 +245,7 @@ Supports iteration via `PaginatedIter` which auto-fetches subsequent pages.
 
 ## Environment Variables
 
-- `HONCHO_API_KEY` — API key for authentication
+- `HONCHO_API_KEY` — optional API key for the async client. Unset sends no `Authorization` header. Empty is a configuration error. The blocking client ignores this variable.
 - `HONCHO_BASE_URL` — Base URL (default: `https://api.honcho.dev`)
 - `HONCHO_WORKSPACE_ID` — Default workspace ID
 
@@ -276,9 +275,10 @@ Uses `thiserror` for `Display` + `std::error::Error`. No fallible constructors; 
 ## Future Milestones
 
 1. **Scopes** — first-class scope resources
-2. **Sync wrappers** — blocking convenience layer
-3. **File uploads** — PDF/text ingestion
-4. **Webhooks, dreaming, and queue status**
+2. **File uploads** — PDF/text ingestion
+3. **Webhooks and dreaming**
+
+The blocking client and workspace queue status (`GET /v3/workspaces/{id}/queue/status`) are in `roncho::blocking::Client`.
 
 ## Compatibility
 

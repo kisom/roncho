@@ -116,8 +116,26 @@ pub async fn update_workspace(
 }
 
 pub async fn delete_workspace(client: &Honcho, workspace_id: &str) -> Result<(), Error> {
-    request_json::<serde_json::Value>(client, workspace_id, reqwest::Method::DELETE, None, None)
+    let url = root_url(client, workspace_id)?;
+    let headers = client.headers()?;
+    let resp = client
+        .send(
+            client
+                .http
+                .delete(url)
+                .headers(headers)
+                .timeout(client.timeout),
+        )
         .await?;
+    let status = resp.status();
+    if status.as_u16() == 409 {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(Error::ActiveSessions { body });
+    }
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(parse_api_error(status.as_u16(), &text));
+    }
     Ok(())
 }
 

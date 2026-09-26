@@ -20,4 +20,7 @@ pub use message::{Message, MessageCreate, MessageSearch};
 pub use page::Page;
 pub use peer::{Peer, PeerCreate};
 pub use session::{Session, SessionCreate, SessionPeerConfig};
-pub use workspace::{Workspace, WorkspaceCreate, WorkspaceListOptions, WorkspaceUpdate};
+pub use workspace::{
+    QueueStatus, QueueStatusQuery, Workspace, WorkspaceCreate, WorkspaceListOptions,
+    WorkspaceUpdate,
+};

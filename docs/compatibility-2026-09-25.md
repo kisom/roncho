@@ -19,8 +19,9 @@ Checked on 2026-09-25 against a self-hosted Honcho with `roncho::blocking::Clien
 | O9 | list, query, delete | list not separately printed; query without filters is 422 (below); delete of the new id succeeded |
 | O10 | `POST .../search` `{"query","limit":5}` | 200, bare array, length 1 |
 | O11 | peer and session search, same body | 200, bare array, length 1 each |
-| O12 | `POST .../peers/owner/chat` `reasoning_level: minimal`, `session_id` set, query about the message | 200. `content` quoted the message. Finished in a few seconds at `minimal` |
+| O12 | `POST .../peers/owner/chat` `reasoning_level: minimal`, `session_id` set, query about the message | 200. `content` quoted the message. Finished in a few seconds at `minimal`. A second run the same day: workspace `POST .../chat` also quoted the message; `include_evidence: true` returned `evidence` with `messages` length 0; `peer_chat_stream` yielded `ping` |
 | O13 | `GET /health` | 200 `{"status":"ok"}`. No version |
+| O14 | `GET .../queue/status` | 200. Counts `pending_work_units`, `in_progress_work_units`, `completed_work_units`, `total_work_units` |
 
 Where this disagrees with Honcho OpenAPI 3.2.1, the server wins:
 
@@ -37,6 +38,8 @@ The [architecture page](https://honcho.dev/docs/v3/documentation/core-concepts/a
 
 On that server, writes with no `Authorization` header succeeded, and `POST /v3/keys` returned `405 {"detail":"Feature is disabled"}`. That matches a self-hosted server with authentication disabled. Whether this process can turn `AUTH_USE_AUTH` on was not found.
 
+Re-checked the same day, after the live suite gained `RONCHO_LIVE_KEY` and a refused-key call. `GET /health` with `Authorization: Bearer roncho-refused-key` returned 200, the same body as a call with no header. Authentication is still off, so a workspace key's reach into another workspace, and whether a peer-scoped key is read-only, were not re-answered. Those two stay open until authentication is on.
+
 ### Q2. Can one message be edited or deleted, and what does deleting a session remove?
 
 [`PUT .../messages/{id}`](https://honcho.dev/docs/v3/api-reference/endpoint/messages/update-message) updates metadata only. There is no delete-message route. The [deleting-data page](https://honcho.dev/docs/v3/documentation/features/advanced/deleting-data) says peers and individual messages cannot be deleted. `DELETE` a session returns 202, marks the session inactive immediately, and then removes messages, embeddings, queued reasoning, session-scoped conclusions, and peer associations in the background. That cascade does not show up in queue status, and there is no endpoint that says when it has finished. Explicit conclusions, tied to the session they came from, are deleted with it. Derived conclusions (deductive, inductive, contradiction) have no owning session and survive. Deleting the workspace removes every peer, session, message, conclusion, collection, embedding, webhook, and queued task.
@@ -49,7 +52,11 @@ The [overview](https://honcho.dev/docs/v3/documentation/introduction/overview) s
 
 Turning derivation off, from the [reasoning-configuration page](https://honcho.dev/docs/v3/documentation/features/advanced/reasoning-configuration): `observe_me: false` on the peer stops Honcho observing that peer, and a session-level peer config overrides it. `observe_others` controls whether that peer models the others in the session. `reasoning.enabled` may be set on the message, the session, or the workspace. The message wins, then the session, then the workspace. If reasoning is disabled, peer cards and dreams are disabled too.
 
-On that server, two messages in one request left `pending_work_units: 2` and `completed_work_units: 0` in the same second. The peer was created with `observe_me: true`, which the response echoed. The off switches were not tried, and the time until a conclusion appeared was not measured.
+On that server, two messages in one request left `pending_work_units: 2` and `completed_work_units: 0` in the same second. The peer was created with `observe_me: true`, which the response echoed.
+
+Re-checked later the same day, on a fresh throwaway workspace, with `observe_me: true` on the session peer. After the first message, `GET .../sessions` queue status for that session was `pending_work_units: 1`, `completed_work_units: 0`. Three further messages, each carrying a unique token, were then queried for a conclusion containing that token, once every 5 seconds, for 75 seconds each. None of the three produced a matching conclusion. Pending climbed 2, then 3, then 4, and completed stayed 0, so the worker did not drain the queue inside those windows.
+
+`observe_me: false` on the peer and on the session peer config: queue status for that session stayed `pending_work_units: 0` across the message and a 20 second wait, and a conclusion query for the message token returned nothing. A second workspace created with `{"reasoning":{"enabled":false}}`, then one message and a 20 second wait, reported `pending_work_units: 0`, `completed_work_units: 0`, `total_work_units: 0`. Both switches kept work off the queue for that wait. The time from message to conclusion, under a queue that is actually draining, was not measured.
 
 ### Q4. Can search and chat be filtered by metadata, and what is the grammar?
 

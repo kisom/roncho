@@ -1,3 +1,4 @@
+#![cfg(feature = "async")]
 use mockito::Server;
 
 mod common;

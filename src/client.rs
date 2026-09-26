@@ -14,7 +14,7 @@ const USER_AGENT_VALUE: &str = concat!("roncho/", env!("CARGO_PKG_VERSION"));
 #[derive(Clone)]
 pub struct Honcho {
     pub(crate) workspace_id: String,
-    pub(crate) api_key: String,
+    pub(crate) api_key: Option<zeroize::Zeroizing<String>>,
     pub(crate) base_url: Url,
     pub(crate) http: reqwest::Client,
     pub(crate) max_retries: usize,
@@ -26,6 +26,7 @@ impl std::fmt::Debug for Honcho {
         f.debug_struct("Honcho")
             .field("workspace_id", &self.workspace_id)
             .field("base_url", &self.base_url)
+            .field("api_key_present", &self.api_key.is_some())
             .field("max_retries", &self.max_retries)
             .field("timeout", &self.timeout)
             .finish_non_exhaustive()
@@ -58,11 +59,15 @@ impl Honcho {
 
     pub(crate) fn headers(&self) -> Result<HeaderMap, Error> {
         let mut headers = HeaderMap::new();
-        let auth_value = format!("Bearer {}", self.api_key);
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&auth_value).map_err(|e| Error::Configuration(e.to_string()))?,
-        );
+        if let Some(key) = &self.api_key {
+            let auth_value = format!("Bearer {}", key.as_str());
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&auth_value).map_err(|_| {
+                    Error::Configuration("api key is not a valid header value".into())
+                })?,
+            );
+        }
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
         Ok(headers)
@@ -207,6 +212,11 @@ impl Honcho {
         self.send_retry(req).await
     }
 
+    /// Retry policy: `max_retries` (default 3) extra attempts.
+    /// GET, PUT, DELETE, and HEAD retry on HTTP 429 and 5xx.
+    /// A connect failure retries for every method, including POST.
+    /// Other methods do not retry an HTTP status. Delay is 200ms, then
+    /// doubled each attempt, and stops doubling after the fifth.
     async fn send_retry(&self, req: reqwest::Request) -> Result<reqwest::Response, Error> {
         let idempotent = matches!(
             *req.method(),
@@ -306,10 +316,18 @@ impl HonchoBuilder {
     }
 
     pub fn build(self) -> Result<Honcho, Error> {
-        let api_key = self
+        let api_key = match self
             .api_key
             .or_else(|| std::env::var("HONCHO_API_KEY").ok())
-            .ok_or(Error::MissingApiKey)?;
+        {
+            Some(key) if key.is_empty() => {
+                return Err(Error::Configuration(
+                    "api key is empty; omit it to send no Authorization header".into(),
+                ));
+            }
+            Some(key) => Some(zeroize::Zeroizing::new(key)),
+            None => None,
+        };
 
         let workspace_id = self
             .workspace_id

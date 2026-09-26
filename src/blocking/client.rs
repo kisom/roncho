@@ -14,7 +14,7 @@ use crate::models::message::{Message, MessageCreate, MessageSearch};
 use crate::models::page::{ListOptions, Page};
 use crate::models::peer::{Peer, PeerCreate};
 use crate::models::session::{Session, SessionCreate};
-use crate::models::workspace::{Workspace, WorkspaceCreate};
+use crate::models::workspace::{QueueStatus, QueueStatusQuery, Workspace, WorkspaceCreate};
 
 const DEFAULT_CONNECT: Duration = Duration::from_secs(10);
 const DEFAULT_READ: Duration = Duration::from_secs(120);
@@ -27,7 +27,7 @@ pub struct Client {
     port: u16,
     host_header: String,
     workspace_id: String,
-    api_key: Option<String>,
+    api_key: Option<zeroize::Zeroizing<String>>,
     connect_timeout: Duration,
     read_timeout: Duration,
     max_body: usize,
@@ -125,10 +125,17 @@ impl Client {
     }
 
     /// `POST /v3/workspaces/{workspace}/conclusions`.
+    /// A batch of 0 or more than 100 is refused before the request is sent.
     pub fn create_conclusions(
         &self,
         batch: &ConclusionBatchCreate,
     ) -> Result<Vec<Conclusion>, Error> {
+        let count = batch.conclusions.len();
+        if !(1..=100).contains(&count) {
+            return Err(Error::Config(format!(
+                "conclusion batch must contain 1 to 100 items, got {count}"
+            )));
+        }
         self.call(
             "POST",
             &self.scoped("conclusions"),
@@ -164,12 +171,28 @@ impl Client {
     /// On the self-hosted server checked for 0.1.0, `filters` must name the observer and the observed peer
     /// (`observer_id`/`observed_id`, or `observer`/`observed`). Omitting them is a 422.
     pub fn query_conclusions(&self, query: &ConclusionQuery) -> Result<Vec<Conclusion>, Error> {
+        require_conclusion_parties(query)?;
         self.call(
             "POST",
             &self.scoped("conclusions/query"),
             None,
             Some(to_json(query)?),
         )
+    }
+
+    /// `GET /v3/workspaces/{workspace}/queue/status`.
+    pub fn queue_status(&self, query: &QueueStatusQuery) -> Result<QueueStatus, Error> {
+        let mut pairs = Vec::new();
+        if let Some(id) = &query.observer_id {
+            pairs.push(("observer_id", id.clone()));
+        }
+        if let Some(id) = &query.sender_id {
+            pairs.push(("sender_id", id.clone()));
+        }
+        if let Some(id) = &query.session_id {
+            pairs.push(("session_id", id.clone()));
+        }
+        self.call("GET", &self.scoped("queue/status"), Some(&pairs), None)
     }
 
     /// `DELETE /v3/workspaces/{workspace}/conclusions/{id}`.
@@ -307,7 +330,7 @@ impl Client {
             method: "POST",
             path,
             host_header: &self.host_header,
-            authorization: self.api_key.as_deref(),
+            authorization: self.authorization(),
             body: Some(&owned),
         })?;
         Ok(ChatStream::from_body(live))
@@ -347,7 +370,7 @@ impl Client {
                 method,
                 path: &path,
                 host_header: &self.host_header,
-                authorization: self.api_key.as_deref(),
+                authorization: self.authorization(),
                 body: owned.as_deref(),
             },
         )
@@ -410,6 +433,8 @@ impl ClientBuilder {
     }
 
     /// Sent as `Authorization: Bearer` when set. Omitted entirely when unset.
+    /// An empty string is a configuration error, not "no key".
+    /// One client holds one key: build a client per workspace.
     pub fn api_key(mut self, key: impl Into<String>) -> Self {
         self.api_key = Some(key.into());
         self
@@ -454,7 +479,15 @@ impl ClientBuilder {
             port: origin.port,
             host_header: origin.host_header,
             workspace_id,
-            api_key: self.api_key.filter(|key| !key.is_empty()),
+            api_key: match self.api_key {
+                Some(key) if key.is_empty() => {
+                    return Err(Error::Config(
+                        "api key is empty; omit it to send no Authorization header".into(),
+                    ));
+                }
+                Some(key) => Some(zeroize::Zeroizing::new(key)),
+                None => None,
+            },
             connect_timeout: self.connect_timeout,
             read_timeout: self.read_timeout,
             max_body: self.max_body,
@@ -545,14 +578,48 @@ fn parse_origin(raw: &str) -> Result<Origin, Error> {
     })
 }
 
+fn authorization_of(key: &Option<zeroize::Zeroizing<String>>) -> Option<&str> {
+    key.as_ref().map(|value| value.as_str())
+}
+
+impl Client {
+    fn authorization(&self) -> Option<&str> {
+        authorization_of(&self.api_key)
+    }
+}
+
 fn expect_success(status: u16, body: &[u8]) -> Result<(), Error> {
     if (200..300).contains(&status) {
         Ok(())
     } else {
-        Err(Error::Status {
+        Err(status_error(status, body))
+    }
+}
+
+fn status_error(status: u16, body: &[u8]) -> Error {
+    match status {
+        401 | 403 => Error::Unauthorized { status },
+        _ => Error::Status {
             status,
             body: http::body_prefix(body),
-        })
+        },
+    }
+}
+
+fn require_conclusion_parties(query: &ConclusionQuery) -> Result<(), Error> {
+    let Some(filters) = &query.filters else {
+        return Err(Error::Config(
+            "conclusion query requires observer and observed filters".into(),
+        ));
+    };
+    let observer = filters.contains_key("observer_id") || filters.contains_key("observer");
+    let observed = filters.contains_key("observed_id") || filters.contains_key("observed");
+    if observer && observed {
+        Ok(())
+    } else {
+        Err(Error::Config(
+            "conclusion query requires observer and observed filters (observer_id/observed_id or observer/observed)".into(),
+        ))
     }
 }
 
@@ -602,6 +669,9 @@ fn chat_body(opts: &DialecticOptions, peer: bool) -> Value {
     }
     if let Some(include) = opts.include_evidence {
         body.insert("include_evidence".into(), json!(include));
+    }
+    if let Some(format) = &opts.response_format {
+        body.insert("response_format".into(), Value::Object(format.clone()));
     }
     if let Some(stream) = opts.stream {
         body.insert("stream".into(), json!(stream));

@@ -16,10 +16,10 @@ cargo run --example quickstart   # run the quickstart example (needs real Honcho
 
 ## Tech Stack
 
-- Rust 2021 edition, `async` throughout (no blocking wrappers in this milestone).
-- `reqwest` (rustls) for HTTP, `serde`/`serde_json` for payloads, `chrono` for timestamps, `uuid` for IDs, `thiserror` for errors.
-- `tokio` async runtime (dev-dependency) and `mockito` for HTTP mocking in tests.
-- Async iterators via `futures` + `async-stream` for pagination and streaming.
+- Rust 2021 edition. The async client is the default feature. `roncho::blocking::Client` is HTTP/1.1 on `std::net` and is selected with `default-features = false, features = ["blocking"]`.
+- Async HTTP uses `reqwest` (rustls). Payloads use `serde`/`serde_json`. Timestamps and ids are strings (`chrono` and `uuid` are not dependencies). Errors use `thiserror`. The blocking client wipes its key with `zeroize`.
+- `tokio` is a dev-dependency for the async tests, and `mockito` mocks HTTP there.
+- Async iterators use `futures` + `async-stream` for pagination and streaming. Those crates are not in a blocking-only build.
 
 ## Architecture
 
@@ -43,7 +43,7 @@ Design philosophy: models are data-only; resources are client-bound runtime obje
 
 ## Environment Variables
 
-- `HONCHO_API_KEY` — authentication (required).
+- `HONCHO_API_KEY` — optional on the async client. Unset sends no `Authorization` header. An empty value is a configuration error. The blocking client does not read this variable.
 - `HONCHO_BASE_URL` — base URL (default `https://api.honcho.dev`).
 - `HONCHO_WORKSPACE_ID` — default workspace.
 
@@ -53,4 +53,4 @@ Design philosophy: models are data-only; resources are client-bound runtime obje
 
 ## Scope
 
-In scope: peers (get-or-create, list, chat, search, messages, sessions), sessions (get-or-create, list, messages, context, chat, search), pagination, streaming, metadata/filtering. Out of scope (future): Conclusions API, peer cards, scopes, workspaces API, file uploads, webhooks, sync wrappers. See `SPEC.md` for full detail.
+In scope: the async client and the blocking client (peers, sessions, messages, conclusions, search, chat, queue status, workspaces). Out of scope: peer cards, scopes, file uploads, webhooks. See `SPEC.md`.

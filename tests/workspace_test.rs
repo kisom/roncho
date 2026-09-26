@@ -1,3 +1,4 @@
+#![cfg(feature = "async")]
 use mockito::Server;
 
 mod common;
@@ -178,7 +179,7 @@ fn delete_workspace_conflict_returns_api_error() {
             .delete("ws-1")
             .await
             .expect_err("expected failure");
-        assert!(matches!(err, roncho::Error::Api { .. }));
+        assert!(matches!(err, roncho::Error::ActiveSessions { .. }));
     });
 }
 

@@ -1,3 +1,4 @@
+#![cfg(feature = "async")]
 use std::sync::Mutex;
 
 use mockito::Server;
@@ -117,14 +118,28 @@ fn peer_chat_error_returns_error() {
 }
 
 #[test]
-fn missing_api_key_returns_error() {
+fn missing_api_key_is_allowed_and_empty_key_is_not() {
     let _lock = ENV_MUTEX.lock().unwrap();
     let _removed = EnvGuard::remove("HONCHO_API_KEY");
-    let result = roncho::Honcho::builder()
+    let _ws = EnvGuard::remove("HONCHO_WORKSPACE_ID");
+    let missing_workspace = roncho::Honcho::builder()
         .base_url("http://localhost:9999")
         .build();
-
-    assert!(result.is_err());
+    assert!(matches!(
+        missing_workspace,
+        Err(roncho::Error::MissingWorkspaceId)
+    ));
+    let no_key = roncho::Honcho::builder()
+        .base_url("http://localhost:9999")
+        .workspace_id("ws-1")
+        .build();
+    assert!(no_key.is_ok());
+    let empty = roncho::Honcho::builder()
+        .base_url("http://localhost:9999")
+        .workspace_id("ws-1")
+        .api_key("")
+        .build();
+    assert!(matches!(empty, Err(roncho::Error::Configuration(_))));
 }
 
 #[test]

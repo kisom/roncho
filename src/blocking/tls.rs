@@ -84,8 +84,19 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
-            let Ok((sock, _)) = listener.accept() else {
-                return;
+            listener.set_nonblocking(true).unwrap();
+            let started = std::time::Instant::now();
+            let sock = loop {
+                match listener.accept() {
+                    Ok((sock, _)) => break sock,
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        if started.elapsed() > Duration::from_secs(2) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return,
+                }
             };
             let Ok(conn) = ServerConnection::new(Arc::new(server_config)) else {
                 return;

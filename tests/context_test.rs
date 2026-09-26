@@ -1,3 +1,4 @@
+#![cfg(feature = "async")]
 mod common;
 use common::make_client;
 use mockito::Server;

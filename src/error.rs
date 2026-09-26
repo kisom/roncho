@@ -11,6 +11,14 @@ pub enum Error {
     #[error("API error (status {status}): {message}")]
     Api { status: u16, message: String },
 
+    /// 401 or 403. The body is not kept, and the key is not included.
+    #[error("the API key was refused (HTTP {status})")]
+    Unauthorized { status: u16 },
+
+    /// `DELETE` workspace returned 409 because sessions are still active.
+    #[error("workspace still has active sessions: {body}")]
+    ActiveSessions { body: String },
+
     #[error("failed to decode JSON response: {0}")]
     Decode(String),
 
@@ -43,7 +51,7 @@ impl Error {
 
     pub fn status_code(&self) -> Option<u16> {
         match self {
-            Error::Api { status, .. } => Some(*status),
+            Error::Api { status, .. } | Error::Unauthorized { status } => Some(*status),
             _ => None,
         }
     }
@@ -57,6 +65,9 @@ struct ApiErrorBody {
 
 #[cfg(feature = "async")]
 pub(crate) fn parse_api_error(status: u16, body: &str) -> Error {
+    if status == 401 || status == 403 {
+        return Error::Unauthorized { status };
+    }
     if let Ok(err_body) = serde_json::from_str::<ApiErrorBody>(body) {
         if let Some(detail) = err_body.detail {
             let message = match detail {

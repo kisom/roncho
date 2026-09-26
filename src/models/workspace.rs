@@ -72,6 +72,46 @@ impl WorkspaceUpdate {
     }
 }
 
+/// `GET /v3/workspaces/{id}/queue/status`. Counts are since the last cleanup, not lifetime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueStatus {
+    pub completed_work_units: u64,
+    pub in_progress_work_units: u64,
+    pub pending_work_units: u64,
+    pub total_work_units: u64,
+    #[serde(default)]
+    pub sessions: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// Optional filters for [`QueueStatus`].
+#[derive(Debug, Clone, Default)]
+pub struct QueueStatusQuery {
+    pub observer_id: Option<String>,
+    pub sender_id: Option<String>,
+    pub session_id: Option<String>,
+}
+
+impl QueueStatusQuery {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn observer_id(mut self, id: impl Into<String>) -> Self {
+        self.observer_id = Some(id.into());
+        self
+    }
+
+    pub fn sender_id(mut self, id: impl Into<String>) -> Self {
+        self.sender_id = Some(id.into());
+        self
+    }
+
+    pub fn session_id(mut self, id: impl Into<String>) -> Self {
+        self.session_id = Some(id.into());
+        self
+    }
+}
+
 /// Options for paginating the list workspaces endpoint.
 #[derive(Debug, Clone, Default)]
 pub struct WorkspaceListOptions {

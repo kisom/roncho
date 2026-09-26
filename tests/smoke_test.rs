@@ -1,3 +1,4 @@
+#![cfg(feature = "async")]
 #![allow(clippy::duplicate_mod)]
 
 #[path = "client_test.rs"]

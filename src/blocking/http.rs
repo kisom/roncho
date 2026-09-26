@@ -58,9 +58,12 @@ pub(crate) fn open(endpoint: &Endpoint<'_>, request: &RawRequest<'_>) -> Result<
     }
     if !(200..300).contains(&status) {
         let body = read_body(&mut stream, &rest.headers, rest.already, endpoint.max_body)?;
-        return Err(Error::Status {
-            status,
-            body: body_prefix(&body),
+        return Err(match status {
+            401 | 403 => Error::Unauthorized { status },
+            _ => Error::Status {
+                status,
+                body: body_prefix(&body),
+            },
         });
     }
     LiveBody::new(stream, rest, endpoint.max_body)
@@ -101,18 +104,29 @@ impl Write for Conn {
 }
 
 fn dial(endpoint: &Endpoint<'_>) -> Result<Conn, Error> {
-    let addr = format!("{}:{}", endpoint.host, endpoint.port)
+    // Name resolution is not bounded by the connect timeout. Each resolved
+    // address gets its own connect attempt: a tailnet name can be IPv6 and IPv4.
+    let addrs: Vec<_> = format!("{}:{}", endpoint.host, endpoint.port)
         .to_socket_addrs()
         .map_err(Error::Connect)?
-        .next()
-        .ok_or_else(|| {
-            Error::Config(format!(
-                "no address for {}:{}",
-                endpoint.host, endpoint.port
-            ))
-        })?;
-    let stream =
-        TcpStream::connect_timeout(&addr, endpoint.connect_timeout).map_err(Error::Connect)?;
+        .collect();
+    if addrs.is_empty() {
+        return Err(Error::Config(format!(
+            "no address for {}:{}",
+            endpoint.host, endpoint.port
+        )));
+    }
+    let mut last = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, endpoint.connect_timeout) {
+            Ok(stream) => return finish_conn(endpoint, stream),
+            Err(err) => last = Some(err),
+        }
+    }
+    Err(Error::Connect(last.expect("at least one address")))
+}
+
+fn finish_conn(endpoint: &Endpoint<'_>, stream: TcpStream) -> Result<Conn, Error> {
     stream
         .set_read_timeout(Some(endpoint.read_timeout))
         .map_err(Error::Io)?;
@@ -447,14 +461,21 @@ fn read_body(
         return Ok(body);
     }
     let mut body = already;
+    if body.len() > max_body {
+        return Err(Error::TooLarge);
+    }
     let mut tmp = [0u8; 8192];
     loop {
-        if body.len() > max_body {
-            return Err(Error::TooLarge);
-        }
-        match stream.read(&mut tmp) {
+        let room = max_body - body.len();
+        let want = room.saturating_add(1).min(tmp.len());
+        match stream.read(&mut tmp[..want]) {
             Ok(0) => return Ok(body),
-            Ok(n) => body.extend_from_slice(&tmp[..n]),
+            Ok(n) => {
+                body.extend_from_slice(&tmp[..n]);
+                if body.len() > max_body {
+                    return Err(Error::TooLarge);
+                }
+            }
             Err(err) if is_timeout(&err) => return Err(Error::Timeout),
             Err(err) => return Err(Error::Io(err)),
         }

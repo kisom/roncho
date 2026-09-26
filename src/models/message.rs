@@ -6,11 +6,27 @@ pub struct Message {
     pub content: String,
     pub peer_id: String,
     pub session_id: String,
-    pub workspace_id: String,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     #[serde(default)]
     pub metadata: serde_json::Map<String, serde_json::Value>,
     pub created_at: String,
-    pub token_count: u32,
+    #[serde(default)]
+    pub token_count: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Message;
+
+    #[test]
+    fn search_shape_omits_workspace_and_token_count() {
+        let raw = r#"{"id":"m","content":"hi","peer_id":"p","session_id":"s","created_at":"2024-01-01T00:00:00Z","metadata":{"label":"keep"}}"#;
+        let msg: Message = serde_json::from_str(raw).unwrap();
+        assert!(msg.workspace_id.is_none());
+        assert!(msg.token_count.is_none());
+        assert_eq!(msg.metadata["label"], "keep");
+    }
 }
 
 /// Builder for creating a new message, returned by `Peer::message()`.

@@ -1,9 +1,19 @@
+#![cfg(feature = "async")]
 use roncho::Honcho;
 
 #[test]
-fn client_builder_requires_api_key() {
-    let result = Honcho::builder().base_url("http://localhost").build();
-    assert!(result.is_err());
+fn client_builder_allows_a_missing_api_key() {
+    let result = Honcho::builder()
+        .base_url("http://localhost")
+        .workspace_id("ws-1")
+        .build();
+    assert!(result.is_ok());
+    let empty = Honcho::builder()
+        .base_url("http://localhost")
+        .workspace_id("ws-1")
+        .api_key("")
+        .build();
+    assert!(matches!(empty, Err(roncho::Error::Configuration(_))));
 }
 
 #[test]

@@ -21,14 +21,14 @@ A native Rust SDK for [Honcho](https://honcho.dev) — the persistent, reasoning
 
 ```toml
 [dependencies]
-roncho = "0.1.0"
+roncho = "0.1.1"
 ```
 
 A blocking-only build has no async runtime and no default base URL. Timestamps are RFC 3339 strings so that graph does not pull `chrono`, `uuid`, or `url`.
 
 ```toml
 [dependencies]
-roncho = { version = "0.1.0", default-features = false, features = ["blocking"] }
+roncho = { version = "0.1.1", default-features = false, features = ["blocking"] }
 ```
 
 ```rust
@@ -41,7 +41,9 @@ let client = Client::builder()
     .build()?;
 ```
 
-The API key is optional. When it is set it is sent as `Authorization: Bearer` and it is omitted from `Debug`. The client reads no environment variables and does not follow redirects. `https://` needs the `tls` feature (`rustls` 0.23 with the `ring` provider and the platform certificate store). See `CHANGELOG.md` and `docs/compatibility-2026-09-25.md`.
+The API key is optional. When it is set it is sent as `Authorization: Bearer`, it is omitted from `Debug`, and it is wiped with `zeroize` when the client is dropped. An empty string is a configuration error. Leave the key unset to send no `Authorization` header. Keys are per workspace, so build one client per workspace, each with that workspace's key.
+
+The client reads no environment variables and does not follow redirects. Connecting tries every address a name resolves to, with the connect timeout applied per address. Resolving the name itself is not limited by that timeout. `https://` needs the `tls` feature (`rustls` 0.23 with the `ring` provider and the platform certificate store). See `CHANGELOG.md` and `docs/compatibility-2026-09-25.md`.
 
 ## Configuration
 
@@ -49,7 +51,7 @@ Configure the client with the builder, or fall back to environment variables:
 
 | Env var             | Purpose                     | Default                 |
 |---------------------|-----------------------------|-------------------------|
-| `HONCHO_API_KEY`    | API key (required)          | —                       |
+| `HONCHO_API_KEY`    | API key (optional; empty is an error) | none (no `Authorization` header) |
 | `HONCHO_BASE_URL`   | API base URL                | `https://api.honcho.dev`|
 | `HONCHO_WORKSPACE_ID` | default workspace         | —                       |
 
@@ -62,7 +64,9 @@ let honcho = Honcho::builder()
     .build()?;
 ```
 
-The builder falls back to the environment variables above for any field you don't set explicitly.
+The async builder falls back to those environment variables for any field you don't set. A missing key sends no `Authorization` header. An empty key, set on the builder or in the environment, is a configuration error.
+
+Retries on the async client: `max_retries` defaults to 3 extra attempts. `GET`, `PUT`, `DELETE`, and `HEAD` are retried on HTTP 429 and 5xx. A connect failure is retried for every method, including `POST`. A POST response status is not retried. The delay starts at 200ms and doubles each attempt, and stops doubling after the fifth.
 
 ## Quickstart
 
@@ -192,4 +196,4 @@ See `AGENTS.md` for project conventions and `SPEC.md` for the full API contract.
 
 ## Roadmap
 
-Still out of scope: first-class scopes, file uploads, webhooks, and a blocking API. See `SPEC.md`.
+Still out of scope: first-class scopes, file uploads, and webhooks. The blocking client is `roncho::blocking::Client` (`default-features = false`). See `SPEC.md`.
