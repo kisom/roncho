@@ -15,6 +15,7 @@ A native Rust SDK for [Honcho](https://honcho.dev) — the persistent, reasoning
 - **Context** — fetch formatted conversation context and convert it to OpenAI or Anthropic message formats.
 - **Pagination** — iterate over results page-by-page with `Page<T>` / `PaginatedIter`, or access individual pages manually.
 - **Metadata & filtering** — attach metadata to messages and filter on them.
+- **Workspaces** — manage workspaces (get-or-create, list, get, update, delete) via `honcho.workspaces()`.
 
 ## Installation
 
@@ -176,7 +177,7 @@ See `AGENTS.md` for project conventions and `SPEC.md` for the full API contract.
 
 Near-term goals for `roncho`:
 
-- Complete support for the **Conclusions API** and **Workspaces API**.
+- Complete support for the **Conclusions API**.
 - Build a **CLI tool** on top of the SDK.
 
 See `SPEC.md` for the full scope and future milestones.

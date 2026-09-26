@@ -25,13 +25,13 @@ This milestone covers the core primitives an agent needs to:
 - Pagination support (iterators + manual page access)
 - Streaming support for chat endpoints (via `futures` + `async-stream`)
 - Metadata and filtering
+- Workspaces API: get-or-create, list (reverse/page/size), get, update, delete — root-scoped `/v3/workspaces`
 
 ### Out of Scope (Future Milestones)
 
 - Conclusions API (create/list/query/delete)
 - Peer cards (get/set)
 - Scopes
-- Workspaces API (list, delete, metadata)
 - File uploads
 - Webhooks
 - Dreaming / queue status
@@ -222,8 +222,15 @@ Supports iteration via `PaginatedIter` which auto-fetches subsequent pages.
 | GET    | `/v3/workspaces/{ws}/sessions/{session}/context`   | Get session context |
 | POST   | `/v3/workspaces/{ws}/chat`                         | Workspace chat      |
 | POST   | `/v3/workspaces/{ws}/search`                       | Search workspace    |
+| POST   | `/v3/workspaces`                                   | Get or create workspace |
+| POST   | `/v3/workspaces/list`                              | List workspaces     |
+| GET    | `/v3/workspaces/{workspace}`                       | Get workspace       |
+| PUT    | `/v3/workspaces/{workspace}`                       | Update workspace    |
+| DELETE | `/v3/workspaces/{workspace}`                       | Delete workspace    |
 
-> Note: The API uses POST for some "list" operations (e.g., get messages, list peers) because it carries filter bodies. See individual endpoint docs.
+> Note: The Workspaces API is root-scoped — the workspace is resolved from the JWT, not a `{ws}` path segment, so requests target `/v3/workspaces`, `/v3/workspaces/list`, and `/v3/workspaces/{id}`.
+
+> Note: The API uses POST for some "list" operations (e.g., get messages, list peers, list workspaces) because it carries filter bodies. See individual endpoint docs.
 
 ## Environment Variables
 
