@@ -43,6 +43,17 @@ impl Session {
         self.created_at
     }
 
+    pub fn to_model(&self) -> crate::models::session::Session {
+        crate::models::session::Session {
+            id: self.id.clone(),
+            created_at: self.created_at,
+            is_active: self.is_active,
+            metadata: self.metadata.clone(),
+            configuration: self.configuration.clone(),
+            workspace_id: self.client.workspace_id().to_string(),
+        }
+    }
+
     /// Add peers to this session. Peers that don't exist are auto-created.
     pub async fn add_peers(
         &self,

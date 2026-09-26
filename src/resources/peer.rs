@@ -43,6 +43,17 @@ impl Peer {
         self.created_at
     }
 
+    pub fn to_model(&self) -> crate::models::peer::Peer {
+        crate::models::peer::Peer {
+            id: self.id.clone(),
+            display_name: self.display_name.clone(),
+            workspace_id: self.client.workspace_id().to_string(),
+            created_at: self.created_at,
+            metadata: self.metadata.clone(),
+            configuration: self.configuration.clone(),
+        }
+    }
+
     /// Create a message builder attributed to this peer.
     pub fn message(&self, content: impl Into<String>) -> MessageCreate {
         MessageCreate::new(content, &self.id)

@@ -51,6 +51,10 @@ impl Honcho {
         &self.workspace_id
     }
 
+    pub fn base_url(&self) -> &url::Url {
+        &self.base_url
+    }
+
     pub fn url(&self, path: &str) -> Result<Url, Error> {
         let full_path = format!("/v3/workspaces/{}/{}", self.workspace_id, path);
         self.base_url

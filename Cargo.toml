@@ -8,6 +8,10 @@ repository = "https://git.wntrmute.dev/kyle/roncho"
 keywords = ["honcho", "memory", "agent", "rag", "sdk"]
 categories = ["api-bindings", "asynchronous"]
 
+[workspace]
+members = ["cli"]
+resolver = "2"
+
 [lib]
 name = "roncho"
 path = "src/lib.rs"
