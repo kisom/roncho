@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// A workspace returned by the Honcho API.
@@ -9,7 +8,7 @@ pub struct Workspace {
     pub metadata: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub configuration: serde_json::Map<String, serde_json::Value>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
 }
 
 /// Parameters for getting or creating a workspace.

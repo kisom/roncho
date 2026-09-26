@@ -288,7 +288,7 @@ fn format_session(s: &Session) -> String {
         s.id,
         if s.is_active { "active" } else { "archived" },
         s.workspace_id(),
-        s.created_at().format("%Y-%m-%dT%H:%M:%SZ")
+        s.created_at()
     );
     if !s.metadata.is_empty() {
         out.push_str(&format!("\nmetadata:  {}", format::json_map(&s.metadata)));

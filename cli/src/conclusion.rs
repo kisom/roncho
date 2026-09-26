@@ -179,6 +179,6 @@ fn format_conclusion(c: &Conclusion) -> String {
         c.observed_id,
         c.times_derived,
         c.session_id.as_deref().unwrap_or("-"),
-        c.created_at.format("%Y-%m-%dT%H:%M:%SZ")
+        c.created_at
     )
 }

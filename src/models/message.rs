@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10,7 +9,7 @@ pub struct Message {
     pub workspace_id: String,
     #[serde(default)]
     pub metadata: serde_json::Map<String, serde_json::Value>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
     pub token_count: u32,
 }
 
@@ -22,7 +21,7 @@ pub struct MessageCreate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<String>,
 }
 
 impl MessageCreate {
@@ -46,8 +45,8 @@ impl MessageCreate {
         self
     }
 
-    pub fn with_created_at(mut self, created_at: DateTime<Utc>) -> Self {
-        self.created_at = Some(created_at);
+    pub fn with_created_at(mut self, created_at: impl Into<String>) -> Self {
+        self.created_at = Some(created_at.into());
         self
     }
 }

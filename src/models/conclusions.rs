@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Reasoning level at which a conclusion was produced.
@@ -16,6 +15,14 @@ fn default_times_derived() -> u64 {
     1
 }
 
+fn null_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 /// A conclusion: a logical certainty derived from interactions between peers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conclusion {
@@ -30,12 +37,12 @@ pub struct Conclusion {
     pub session_id: Option<String>,
     #[serde(default)]
     pub level: Level,
-    #[serde(rename = "source_ids", default)]
+    #[serde(rename = "source_ids", default, deserialize_with = "null_vec")]
     pub source_ids: Vec<String>,
     #[serde(rename = "times_derived", default = "default_times_derived")]
     pub times_derived: u64,
     #[serde(rename = "created_at")]
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
 }
 
 /// Create a single conclusion.

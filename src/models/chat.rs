@@ -39,7 +39,7 @@ pub struct EvidenceMessageRef {
     #[serde(rename = "peer_id")]
     pub peer_id: String,
     #[serde(rename = "created_at")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ pub struct EvidenceObservation {
     pub id: String,
     pub level: Level,
     pub content: String,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: String,
     pub observer_id: String,
     pub observed_id: String,
     #[serde(default)]

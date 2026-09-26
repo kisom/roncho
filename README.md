@@ -26,6 +26,25 @@ The crate is not yet published to crates.io. For now, depend on it via git:
 roncho = { git = "https://git.wntrmute.dev/kyle/roncho" }
 ```
 
+Boxmaker's `memoryd` uses the blocking client only. That build has no async runtime and no default base URL. Timestamps are RFC 3339 strings so the blocking graph does not pull `chrono`, `uuid`, or `url`.
+
+```toml
+[dependencies]
+roncho = { git = "https://git.wntrmute.dev/kyle/roncho", default-features = false, features = ["blocking"] }
+```
+
+```rust
+use roncho::blocking::Client;
+
+let client = Client::builder()
+    .base_url("http://127.0.0.1:8000")
+    .workspace_id("my-workspace")
+    .read_timeout(std::time::Duration::from_secs(120))
+    .build()?;
+```
+
+The API key is optional. When it is set it is sent as `Authorization: Bearer` and it is omitted from `Debug`. The client reads no environment variables and does not follow redirects. See `CHANGELOG.md` and `docs/rift-2026-09-25.md`.
+
 ## Configuration
 
 Configure the client with the builder, or fall back to environment variables:

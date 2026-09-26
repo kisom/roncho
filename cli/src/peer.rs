@@ -270,7 +270,7 @@ fn format_peer(p: &Peer) -> String {
         "id:        {}\nworkspace: {}\ncreated:   {}",
         p.id,
         p.workspace_id(),
-        p.created_at().format("%Y-%m-%dT%H:%M:%SZ")
+        p.created_at()
     );
     if !p.metadata.is_empty() {
         s.push_str(&format!("\nmetadata:    {}", format::json_map(&p.metadata)));

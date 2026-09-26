@@ -1,7 +1,6 @@
 use std::pin::Pin;
 
 use async_stream::stream;
-use chrono::{DateTime, Utc};
 use futures::Stream;
 
 use crate::api::sessions as sessions_api;
@@ -17,7 +16,7 @@ use crate::models::session::SessionPeerConfig;
 pub struct Session {
     pub(crate) client: Honcho,
     pub id: String,
-    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) created_at: String,
     pub is_active: bool,
     pub metadata: serde_json::Map<String, serde_json::Value>,
     pub configuration: serde_json::Map<String, serde_json::Value>,
@@ -39,14 +38,14 @@ impl Session {
         self.client.workspace_id()
     }
 
-    pub fn created_at(&self) -> DateTime<Utc> {
-        self.created_at
+    pub fn created_at(&self) -> &str {
+        &self.created_at
     }
 
     pub fn to_model(&self) -> crate::models::session::Session {
         crate::models::session::Session {
             id: self.id.clone(),
-            created_at: self.created_at,
+            created_at: self.created_at.clone(),
             is_active: self.is_active,
             metadata: self.metadata.clone(),
             configuration: self.configuration.clone(),

@@ -1,11 +1,10 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Peer {
     pub id: String,
     pub workspace_id: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
     #[serde(default)]
     pub metadata: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]

@@ -1,7 +1,6 @@
 use std::pin::Pin;
 
 use async_stream::stream;
-use chrono::{DateTime, Utc};
 use futures::Stream;
 
 use crate::api::peers as peers_api;
@@ -17,7 +16,7 @@ use crate::models::page::{ListOptions, Page};
 pub struct Peer {
     pub(crate) client: Honcho,
     pub id: String,
-    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) created_at: String,
     pub metadata: serde_json::Map<String, serde_json::Value>,
     pub configuration: serde_json::Map<String, serde_json::Value>,
 }
@@ -37,15 +36,15 @@ impl Peer {
         self.client.workspace_id()
     }
 
-    pub fn created_at(&self) -> DateTime<Utc> {
-        self.created_at
+    pub fn created_at(&self) -> &str {
+        &self.created_at
     }
 
     pub fn to_model(&self) -> crate::models::peer::Peer {
         crate::models::peer::Peer {
             id: self.id.clone(),
             workspace_id: self.client.workspace_id().to_string(),
-            created_at: self.created_at,
+            created_at: self.created_at.clone(),
             metadata: self.metadata.clone(),
             configuration: self.configuration.clone(),
         }

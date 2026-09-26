@@ -2,6 +2,7 @@
 name = "roncho"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 description = "Rust SDK for Honcho — persistent, reasoning-based memory for agents"
 license = "Apache-2.0"
 repository = "https://git.wntrmute.dev/kyle/roncho"
@@ -16,26 +17,28 @@ resolver = "2"
 name = "roncho"
 path = "src/lib.rs"
 
+[features]
+default = ["async", "blocking"]
+# Tokio client. Not part of a `default-features = false, features = ["blocking"]` build.
+async = ["dep:reqwest", "dep:url", "dep:async-stream", "dep:futures", "dep:tokio", "dep:bytes"]
+# std::net HTTP/1.1 client. No async runtime and no default base URL.
+blocking = []
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
-url = "2"
-uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
-async-stream = "0.3"
-futures = "0.3"
-tokio = { version = "1", features = ["time", "sync", "io-util"] }
-bytes = "1"
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls", "stream"] }
+url = { version = "2", optional = true }
+async-stream = { version = "0.3", optional = true }
+futures = { version = "0.3", optional = true }
+tokio = { version = "1", optional = true, features = ["time", "sync", "io-util"] }
+bytes = { version = "1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 mockito = "1.7"
 serde_json = "1"
-
-[features]
-default = []
 
 [[example]]
 name = "quickstart"

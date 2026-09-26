@@ -1,4 +1,3 @@
-use chrono::Utc;
 use mockito::Server;
 
 mod common;
@@ -36,7 +35,7 @@ fn create_message_succeeds() {
                 workspace_id: "ws-1".to_string(),
                 metadata: Default::default(),
                 configuration: Default::default(),
-                created_at: Utc::now(),
+                created_at: "2024-01-01T00:00:00Z".to_string(),
             },
         );
 
@@ -79,7 +78,7 @@ fn list_messages_succeeds() {
                 workspace_id: "ws-1".to_string(),
                 metadata: Default::default(),
                 configuration: Default::default(),
-                created_at: Utc::now(),
+                created_at: "2024-01-01T00:00:00Z".to_string(),
             },
         );
 
