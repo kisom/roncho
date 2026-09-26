@@ -27,7 +27,7 @@ fn session_context_succeeds() {
             .session("sess-1")
             .await
             .expect("failed to create session");
-        
+
         let ctx = session
             .context(&roncho::SessionContextRequest {
                 tokens: Some(10),
@@ -62,7 +62,7 @@ fn peer_context_with_target_succeeds() {
 
         let client = make_client(&server.url());
         let peer = client.peer("peer-1").await.expect("failed to create peer");
-        
+
         let ctx = peer
             .context(Some("peer-2"), None)
             .await
