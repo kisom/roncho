@@ -1,0 +1,8 @@
+# Copy to ~/.config/roncho/roncho.toml
+# The CLI reads this file. The blocking client uses it for any
+# base_url, workspace_id, or api_key you do not set on the builder.
+# Omit api_key while the server has authentication off.
+# An empty api_key is an error.
+
+base_url = "http://127.0.0.1:8000"
+workspace_id = "roncho-test"

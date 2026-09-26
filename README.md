@@ -43,7 +43,7 @@ let client = Client::builder()
 
 The API key is optional. When it is set it is sent as `Authorization: Bearer`, it is omitted from `Debug`, and it is wiped with `zeroize` when the client is dropped. An empty string is a configuration error. Leave the key unset to send no `Authorization` header. Keys are per workspace, so build one client per workspace, each with that workspace's key.
 
-The client reads no environment variables and does not follow redirects. Connecting tries every address a name resolves to, with the connect timeout applied per address. Resolving the name itself is not limited by that timeout. `https://` needs the `tls` feature (`rustls` 0.23 with the `ring` provider and the platform certificate store). See `CHANGELOG.md` and `docs/compatibility-2026-09-25.md`.
+The blocking client reads no environment variables and does not follow redirects. `Client::builder().build()` fills a `base_url`, `workspace_id`, or `api_key` you left unset from `~/.config/roncho/roncho.toml` when that file exists. `Client::builder().from_file(path)` reads a chosen file instead. A value set on the builder wins. `without_config_file()` skips the file. Connecting tries every address a name resolves to, with the connect timeout applied per address. Resolving the name itself is not limited by that timeout. `https://` needs the `tls` feature (`rustls` 0.23 with the `ring` provider and the platform certificate store). See `CHANGELOG.md` and `docs/compatibility-2026-09-25.md`.
 
 ## Configuration
 
@@ -190,10 +190,14 @@ cargo test           # run the test suite (mockito-based integration tests)
 cargo clippy         # lint
 cargo fmt            # format
 cargo run --example quickstart   # run the quickstart (needs real credentials)
+cargo test --test live -- --ignored --nocapture --test-threads=1
+# live suite: RONCHO_LIVE_URL or base_url in ~/.config/roncho/roncho.toml
 ```
 
-See `AGENTS.md` for project conventions and `SPEC.md` for the full API contract.
+See `AGENTS.md` for project conventions. `docs/compatibility-2026-09-25.md` records where one self-hosted server differed from OpenAPI 3.2.1.
 
 ## Roadmap
 
-Still out of scope: first-class scopes, file uploads, and webhooks. The blocking client is `roncho::blocking::Client` (`default-features = false`). See `SPEC.md`.
+`roncho::blocking::Client` is the surface 1.0.0 will freeze. It now includes scopes, file upload, and dreaming. Webhooks stay out. The async `Honcho` client follows those same operations and keeps the environment fallback and the `https://api.honcho.dev` default.
+
+The CLI and the blocking client read `~/.config/roncho/roncho.toml` (`api_key`, `base_url`, `workspace_id`). A sample with authentication left off is `docs/roncho.toml.example`. The blocking builder uses that file only for fields you did not set.

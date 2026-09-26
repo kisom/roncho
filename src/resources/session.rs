@@ -91,6 +91,14 @@ impl Session {
         sessions_api::create_messages(&self.client, &self.id, messages).await
     }
 
+    /// `POST .../sessions/{id}/messages/upload`.
+    pub async fn upload_file(
+        &self,
+        upload: &crate::upload::FileUpload<'_>,
+    ) -> Result<Vec<Message>, Error> {
+        sessions_api::upload_file(&self.client, &self.id, upload).await
+    }
+
     /// Get messages from this session.
     pub async fn messages(
         &self,

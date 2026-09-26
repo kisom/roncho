@@ -55,6 +55,10 @@ impl Conclusions {
     ) -> Result<Vec<Conclusion>, Error> {
         let mut opts = ConclusionQuery::new(query);
         opts.top_k = top_k;
+        self.query_with(opts).await
+    }
+
+    pub async fn query_with(&self, mut opts: ConclusionQuery) -> Result<Vec<Conclusion>, Error> {
         opts.filters = merge_scope(self.filters.as_ref(), opts.filters.as_ref());
         conclusions_api::query_conclusions(&self.client, &opts).await
     }

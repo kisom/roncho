@@ -12,7 +12,7 @@ cargo clippy         # lint
 cargo run --example quickstart   # run the quickstart example (needs real Honcho credentials)
 ```
 
-`cargo test` is the gate for SDK changes. Integration tests live under `tests/` and mock Honcho with `mockito`. Keep those mocks on the live v3 contract in `SPEC.md`, not on an earlier guess.
+`cargo test` is the gate for SDK changes. Integration tests live under `tests/` and mock Honcho with `mockito`. Keep those mocks on the Honcho v3 HTTP contract, not on an earlier guess. A blocking-only run is `cargo test --no-default-features -F blocking -p roncho`, and the TLS run is the same command with `-F tls`. Live checks are `cargo test --test live -- --ignored --nocapture --test-threads=1` and need `RONCHO_LIVE_URL` or `base_url` in `~/.config/roncho/roncho.toml`. They write only to throwaway `roncho-live-*` workspaces.
 
 ## Tech Stack
 
@@ -39,11 +39,11 @@ Design philosophy: models are data-only; resources are client-bound runtime obje
 - Use the builder pattern for client config (`Honcho::builder()...build()`).
 - Config errors are returned from methods, not from constructors (no fallible constructors).
 - Tests live in `tests/*.rs`, registered as `mod` in `tests/smoke_test.rs`; shared helpers go in `tests/common/mod.rs`.
-- Follow Honcho API v3 endpoint contracts in `SPEC.md` — do not drift from them.
+- Follow the Honcho v3 HTTP contract. `docs/compatibility-2026-09-25.md` records where one self-hosted server differed from OpenAPI 3.2.1.
 
 ## Environment Variables
 
-- `HONCHO_API_KEY` — optional on the async client. Unset sends no `Authorization` header. An empty value is a configuration error. The blocking client does not read this variable.
+- `HONCHO_API_KEY` — optional on the async client. Unset sends no `Authorization` header. An empty value is a configuration error. The blocking client does not read this variable. It does read `~/.config/roncho/roncho.toml` for builder fields that were left unset.
 - `HONCHO_BASE_URL` — base URL (default `https://api.honcho.dev`).
 - `HONCHO_WORKSPACE_ID` — default workspace.
 
@@ -53,4 +53,8 @@ Design philosophy: models are data-only; resources are client-bound runtime obje
 
 ## Scope
 
-In scope: the async client and the blocking client (peers, sessions, messages, conclusions, search, chat, queue status, workspaces). Out of scope: peer cards, scopes, file uploads, webhooks. See `SPEC.md`.
+`roncho::blocking::Client` is the API that 1.0.0 will freeze. New work lands there first. The async `Honcho` client follows those shapes and may keep its environment fallback and `https://api.honcho.dev` default.
+
+In scope now, on the blocking client: peers, sessions, messages, conclusions, search, chat (including streaming), queue status, workspaces, scopes, file upload, and dreaming. The async client also has peer cards, peer context, and session context.
+
+Out of scope: webhooks.

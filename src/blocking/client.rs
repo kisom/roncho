@@ -13,8 +13,10 @@ use crate::models::conclusions::{
 use crate::models::message::{Message, MessageCreate, MessageSearch};
 use crate::models::page::{ListOptions, Page};
 use crate::models::peer::{Peer, PeerCreate};
+use crate::models::scope::{ScheduleDream, Scope, ScopeBackfill, ScopeCreate};
 use crate::models::session::{Session, SessionCreate};
 use crate::models::workspace::{QueueStatus, QueueStatusQuery, Workspace, WorkspaceCreate};
+use crate::upload::FileUpload;
 
 const DEFAULT_CONNECT: Duration = Duration::from_secs(10);
 const DEFAULT_READ: Duration = Duration::from_secs(120);
@@ -275,6 +277,114 @@ impl Client {
         )
     }
 
+    /// `POST /v3/workspaces/{workspace}/scopes`. Returns the existing scope when the id is taken.
+    pub fn scope(&self, create: &ScopeCreate) -> Result<Scope, Error> {
+        crate::models::scope::check_scope_id(&create.id).map_err(Error::Config)?;
+        self.call("POST", &self.scoped("scopes"), None, Some(to_json(create)?))
+    }
+
+    /// `GET /v3/workspaces/{workspace}/scopes/{id}`. Does not create the scope.
+    pub fn get_scope(&self, scope_id: &str) -> Result<Scope, Error> {
+        crate::models::scope::check_scope_id(scope_id).map_err(Error::Config)?;
+        let path = self.scoped(&format!("scopes/{}", enc(scope_id)?));
+        self.call("GET", &path, None, None)
+    }
+
+    /// `POST /v3/workspaces/{workspace}/scopes/list`.
+    pub fn list_scopes(&self, opts: &ListOptions) -> Result<Page<Scope>, Error> {
+        self.call(
+            "POST",
+            &self.scoped("scopes/list"),
+            Some(&list_query(opts)),
+            Some(json!({})),
+        )
+    }
+
+    /// `POST /v3/workspaces/{workspace}/scopes/{id}/sessions`.
+    /// One to 100 existing session ids. A session that already has messages is backfilled in the background.
+    pub fn add_scope_sessions(&self, scope_id: &str, session_ids: &[String]) -> Result<(), Error> {
+        crate::models::scope::check_scope_id(scope_id).map_err(Error::Config)?;
+        let count = session_ids.len();
+        if !(1..=100).contains(&count) {
+            return Err(Error::Config(format!(
+                "a scope membership call takes 1 to 100 session ids, got {count}"
+            )));
+        }
+        let path = self.scoped(&format!("scopes/{}/sessions", enc(scope_id)?));
+        self.call_ignore(
+            "POST",
+            &path,
+            None,
+            Some(json!({ "session_ids": session_ids })),
+        )
+    }
+
+    /// `POST /v3/workspaces/{workspace}/scopes/{id}/sessions/list`.
+    pub fn list_scope_sessions(
+        &self,
+        scope_id: &str,
+        opts: &ListOptions,
+    ) -> Result<Page<Session>, Error> {
+        crate::models::scope::check_scope_id(scope_id).map_err(Error::Config)?;
+        let path = self.scoped(&format!("scopes/{}/sessions/list", enc(scope_id)?));
+        self.call("POST", &path, Some(&list_query(opts)), Some(json!({})))
+    }
+
+    /// `DELETE /v3/workspaces/{workspace}/scopes/{id}/sessions/{session}`.
+    pub fn remove_scope_session(&self, scope_id: &str, session_id: &str) -> Result<(), Error> {
+        crate::models::scope::check_scope_id(scope_id).map_err(Error::Config)?;
+        let path = self.scoped(&format!(
+            "scopes/{}/sessions/{}",
+            enc(scope_id)?,
+            enc(session_id)?
+        ));
+        self.call_ignore("DELETE", &path, None, None)
+    }
+
+    /// `GET /v3/workspaces/{workspace}/scopes/{id}/status`.
+    /// Only sessions that have had a backfill enqueued appear.
+    pub fn scope_status(
+        &self,
+        scope_id: &str,
+    ) -> Result<std::collections::HashMap<String, ScopeBackfill>, Error> {
+        crate::models::scope::check_scope_id(scope_id).map_err(Error::Config)?;
+        let path = self.scoped(&format!("scopes/{}/status", enc(scope_id)?));
+        let body: crate::models::scope::ScopeStatusBody = self.call("GET", &path, None, None)?;
+        Ok(body.into_map())
+    }
+
+    /// `POST /v3/workspaces/{workspace}/sessions/{session}/messages/upload`.
+    /// `peer_id` owns the messages. `metadata` and `configuration` are JSON objects sent as form strings.
+    pub fn upload_file(
+        &self,
+        session_id: &str,
+        upload: &FileUpload<'_>,
+    ) -> Result<Vec<Message>, Error> {
+        let (body, form_type) = crate::upload::prepare(upload).map_err(Error::Config)?;
+        let path = self.scoped(&format!("sessions/{}/messages/upload", enc(session_id)?));
+        let response = self.raw_bytes("POST", &path, &body, &form_type)?;
+        expect_success(response.status, &response.body)?;
+        serde_json::from_slice(&response.body).map_err(|err| {
+            Error::Decode(format!(
+                "{err}; body: {}",
+                http::body_prefix(&response.body)
+            ))
+        })
+    }
+
+    /// `POST /v3/workspaces/{workspace}/schedule_dream`. Returns when the dream is accepted (204).
+    pub fn schedule_dream(&self, dream: &ScheduleDream) -> Result<(), Error> {
+        if dream.observer.is_empty() {
+            return Err(Error::Config("dream observer is required".into()));
+        }
+        self.call_ignore(
+            "POST",
+            &self.scoped("schedule_dream"),
+            None,
+            Some(to_json(dream)?),
+        )
+    }
+
     /// `GET /health` on the configured origin. Honcho 3.2.1 exposes this and no version field.
     pub fn probe(&self) -> Result<Probe, Error> {
         let response = self.raw("GET", "/health", None, None)?;
@@ -331,6 +441,7 @@ impl Client {
             path,
             host_header: &self.host_header,
             authorization: self.authorization(),
+            content_type: None,
             body: Some(&owned),
         })?;
         Ok(ChatStream::from_body(live))
@@ -352,6 +463,26 @@ impl Client {
         }
     }
 
+    fn raw_bytes(
+        &self,
+        method: &str,
+        path: &str,
+        body: &[u8],
+        content_type: &str,
+    ) -> Result<http::RawResponse, Error> {
+        http::exchange(
+            &self.endpoint(),
+            &RawRequest {
+                method,
+                path,
+                host_header: &self.host_header,
+                authorization: self.authorization(),
+                content_type: Some(content_type),
+                body: Some(body),
+            },
+        )
+    }
+
     fn raw(
         &self,
         method: &str,
@@ -371,6 +502,7 @@ impl Client {
                 path: &path,
                 host_header: &self.host_header,
                 authorization: self.authorization(),
+                content_type: None,
                 body: owned.as_deref(),
             },
         )
@@ -392,6 +524,8 @@ pub struct ClientBuilder {
     connect_timeout: Duration,
     read_timeout: Duration,
     max_body: usize,
+    read_config: bool,
+    config_path: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for ClientBuilder {
@@ -416,6 +550,8 @@ impl Default for ClientBuilder {
             connect_timeout: DEFAULT_CONNECT,
             read_timeout: DEFAULT_READ,
             max_body: DEFAULT_MAX_BODY,
+            read_config: true,
+            config_path: None,
         }
     }
 }
@@ -456,12 +592,26 @@ impl ClientBuilder {
         self
     }
 
+    /// Fill unset `base_url`, `workspace_id`, and `api_key` from this file.
+    /// A field set on the builder, before or after this call, wins.
+    pub fn from_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.config_path = Some(path.into());
+        self.read_config = true;
+        self
+    }
+
+    /// Do not read `roncho.toml`. Use this when the process must not pick up
+    /// the account's config file.
+    pub fn without_config_file(mut self) -> Self {
+        self.read_config = false;
+        self.config_path = None;
+        self
+    }
+
     pub fn build(self) -> Result<Client, Error> {
-        let base = self
-            .base_url
-            .ok_or_else(|| Error::Config("base URL is required".into()))?;
-        let workspace_id = self
-            .workspace_id
+        let (base_url, workspace_id, api_key) = self.resolve_config()?;
+        let base = base_url.ok_or_else(|| Error::Config("base URL is required".into()))?;
+        let workspace_id = workspace_id
             .filter(|id| !id.is_empty())
             .ok_or_else(|| Error::Config("workspace id is required".into()))?;
         let origin = parse_origin(&base)?;
@@ -479,7 +629,7 @@ impl ClientBuilder {
             port: origin.port,
             host_header: origin.host_header,
             workspace_id,
-            api_key: match self.api_key {
+            api_key: match api_key {
                 Some(key) if key.is_empty() => {
                     return Err(Error::Config(
                         "api key is empty; omit it to send no Authorization header".into(),
@@ -495,6 +645,33 @@ impl ClientBuilder {
             #[cfg(feature = "tls")]
             tls,
         })
+    }
+}
+
+impl ClientBuilder {
+    fn resolve_config(&self) -> Result<(Option<String>, Option<String>, Option<String>), Error> {
+        let mut base_url = self.base_url.clone();
+        let mut workspace_id = self.workspace_id.clone();
+        let mut api_key = self.api_key.clone();
+        if self.read_config && (base_url.is_none() || workspace_id.is_none() || api_key.is_none()) {
+            let file = if let Some(path) = &self.config_path {
+                Some(crate::config::load_path(path).map_err(Error::Config)?)
+            } else {
+                crate::config::load_default().map_err(Error::Config)?
+            };
+            if let Some(file) = file {
+                if base_url.is_none() {
+                    base_url = file.base_url.filter(|value| !value.is_empty());
+                }
+                if workspace_id.is_none() {
+                    workspace_id = file.workspace_id.filter(|value| !value.is_empty());
+                }
+                if api_key.is_none() {
+                    api_key = file.api_key;
+                }
+            }
+        }
+        Ok((base_url, workspace_id, api_key))
     }
 }
 

@@ -80,6 +80,16 @@ pub async fn get_session_peers(
     client.get_json(&path, &query).await
 }
 
+pub async fn upload_file(
+    client: &Honcho,
+    session_id: &str,
+    upload: &crate::upload::FileUpload<'_>,
+) -> Result<Vec<Message>, Error> {
+    let (body, content_type) = crate::upload::prepare(upload).map_err(Error::Configuration)?;
+    let path = format!("sessions/{session_id}/messages/upload");
+    client.post_bytes(&path, body, &content_type).await
+}
+
 pub async fn create_messages(
     client: &Honcho,
     session_id: &str,

@@ -135,6 +135,55 @@ impl Honcho {
         decode_json(resp).await
     }
 
+    pub(crate) async fn post_json_empty(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<(), Error> {
+        let url = self.url(path)?;
+        let headers = self.headers()?;
+        let resp = self
+            .send(
+                self.http
+                    .post(url)
+                    .headers(headers)
+                    .json(body)
+                    .timeout(self.timeout),
+            )
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(parse_api_error(status.as_u16(), &text));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn post_bytes<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+        content_type: &str,
+    ) -> Result<T, Error> {
+        let url = self.url(path)?;
+        let mut headers = self.headers()?;
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_str(content_type)
+                .map_err(|_| Error::Configuration("content type is not a valid header".into()))?,
+        );
+        let resp = self
+            .send(
+                self.http
+                    .post(url)
+                    .headers(headers)
+                    .body(body)
+                    .timeout(self.timeout),
+            )
+            .await?;
+        decode_json(resp).await
+    }
+
     /// POST with a query string and no body. Clone uses this.
     pub(crate) async fn post_query<T: serde::de::DeserializeOwned>(
         &self,
@@ -276,13 +325,28 @@ fn retry_delay(attempt: usize) -> Duration {
     Duration::from_millis(200u64.saturating_mul(1u64 << (attempt.min(5) - 1)))
 }
 
-#[derive(Default)]
 pub struct HonchoBuilder {
     workspace_id: Option<String>,
     api_key: Option<String>,
     base_url: Option<String>,
     max_retries: Option<usize>,
     timeout: Option<Duration>,
+    read_config: bool,
+    config_path: Option<std::path::PathBuf>,
+}
+
+impl Default for HonchoBuilder {
+    fn default() -> Self {
+        Self {
+            workspace_id: None,
+            api_key: None,
+            base_url: None,
+            max_retries: None,
+            timeout: None,
+            read_config: true,
+            config_path: None,
+        }
+    }
 }
 
 impl HonchoBuilder {
@@ -315,11 +379,41 @@ impl HonchoBuilder {
         self
     }
 
+    pub fn from_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.config_path = Some(path.into());
+        self.read_config = true;
+        self
+    }
+
+    pub fn without_config_file(mut self) -> Self {
+        self.read_config = false;
+        self.config_path = None;
+        self
+    }
+
     pub fn build(self) -> Result<Honcho, Error> {
-        let api_key = match self
-            .api_key
-            .or_else(|| std::env::var("HONCHO_API_KEY").ok())
-        {
+        let mut api_key = self.api_key.clone();
+        let mut workspace_id = self.workspace_id.clone();
+        let mut base_url = self.base_url.clone();
+        if self.read_config && (api_key.is_none() || workspace_id.is_none() || base_url.is_none()) {
+            let file = if let Some(path) = &self.config_path {
+                Some(crate::config::load_path(path).map_err(Error::Configuration)?)
+            } else {
+                crate::config::load_default().map_err(Error::Configuration)?
+            };
+            if let Some(file) = file {
+                if api_key.is_none() {
+                    api_key = file.api_key;
+                }
+                if workspace_id.is_none() {
+                    workspace_id = file.workspace_id.filter(|id| !id.is_empty());
+                }
+                if base_url.is_none() {
+                    base_url = file.base_url.filter(|url| !url.is_empty());
+                }
+            }
+        }
+        let api_key = match api_key.or_else(|| std::env::var("HONCHO_API_KEY").ok()) {
             Some(key) if key.is_empty() => {
                 return Err(Error::Configuration(
                     "api key is empty; omit it to send no Authorization header".into(),
@@ -329,13 +423,11 @@ impl HonchoBuilder {
             None => None,
         };
 
-        let workspace_id = self
-            .workspace_id
+        let workspace_id = workspace_id
             .or_else(|| std::env::var("HONCHO_WORKSPACE_ID").ok())
             .ok_or(Error::MissingWorkspaceId)?;
 
-        let base_url_str = self
-            .base_url
+        let base_url_str = base_url
             .or_else(|| std::env::var("HONCHO_BASE_URL").ok())
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 

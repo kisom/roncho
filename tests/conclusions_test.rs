@@ -129,7 +129,16 @@ fn query_conclusions_succeeds() {
     rt.block_on(async {
         server
             .mock("POST", "/v3/workspaces/test-workspace/conclusions/query")
-            .match_request(|req| req.body().ok().and_then(|b| std::str::from_utf8(b).ok()) == Some(r#"{"query":"search","top_k":5}"#))
+            .match_request(|req| {
+                req.body()
+                    .ok()
+                    .and_then(|b| std::str::from_utf8(b).ok())
+                    .is_some_and(|body| {
+                        body.contains(r#""query":"search""#)
+                            && body.contains(r#""top_k":5"#)
+                            && body.contains(r#""observer_id":"peer-1""#)
+                    })
+            })
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
@@ -138,9 +147,17 @@ fn query_conclusions_succeeds() {
             .create();
 
         let client = make_client(&server.url());
+        let mut query = roncho::ConclusionQuery::new("search");
+        query.top_k = Some(5);
+        query.filters = Some(
+            serde_json::json!({"observer_id": "peer-1", "observed_id": "peer-2"})
+                .as_object()
+                .cloned()
+                .unwrap(),
+        );
         let results = client
             .conclusions()
-            .query("search", Some(5))
+            .query_with(query)
             .await
             .expect("failed to query conclusions");
 

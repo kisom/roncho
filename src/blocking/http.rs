@@ -15,6 +15,7 @@ pub(crate) struct RawRequest<'a> {
     pub path: &'a str,
     pub host_header: &'a str,
     pub authorization: Option<&'a str>,
+    pub content_type: Option<&'a str>,
     pub body: Option<&'a [u8]>,
 }
 
@@ -349,7 +350,8 @@ fn encode(request: &RawRequest<'_>) -> Vec<u8> {
         push(&mut out, format!("Authorization: Bearer {auth}\r\n"));
     }
     if let Some(body) = request.body {
-        push(&mut out, "Content-Type: application/json\r\n");
+        let content_type = request.content_type.unwrap_or("application/json");
+        push(&mut out, format!("Content-Type: {content_type}\r\n"));
         push(&mut out, format!("Content-Length: {}\r\n", body.len()));
     }
     push(&mut out, "\r\n");

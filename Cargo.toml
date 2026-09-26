@@ -4,6 +4,7 @@ version = "0.1.1"
 edition = "2021"
 rust-version = "1.95"
 description = "Rust SDK for Honcho — persistent, reasoning-based memory for agents"
+repository = "https://github.com/kisom/roncho"
 license = "Apache-2.0"
 keywords = ["honcho", "memory", "agent", "rag", "sdk"]
 categories = ["api-bindings", "asynchronous"]
@@ -31,6 +32,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 zeroize = { version = "1.9.0", default-features = false, features = ["alloc"] }
+toml = "1.1"
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls", "stream"] }
 url = { version = "2", optional = true }
 async-stream = { version = "0.3", optional = true }

@@ -9,7 +9,11 @@ use crate::error::{parse_api_error, Error};
 use crate::models::chat::{ChatResponse, DialecticOptions, StreamChunk};
 use crate::models::message::{Message, MessageSearch};
 use crate::models::page::{ListOptions, Page};
-use crate::models::workspace::{Workspace, WorkspaceCreate, WorkspaceListOptions, WorkspaceUpdate};
+use crate::models::scope::ScheduleDream;
+use crate::models::workspace::{
+    QueueStatus, QueueStatusQuery, Workspace, WorkspaceCreate, WorkspaceListOptions,
+    WorkspaceUpdate,
+};
 
 /// Build a URL rooted at `/v3/workspaces` (not scoped to a workspace).
 ///
@@ -137,6 +141,28 @@ pub async fn delete_workspace(client: &Honcho, workspace_id: &str) -> Result<(),
         return Err(parse_api_error(status.as_u16(), &text));
     }
     Ok(())
+}
+
+pub async fn queue_status(client: &Honcho, query: &QueueStatusQuery) -> Result<QueueStatus, Error> {
+    let mut pairs = Vec::new();
+    if let Some(id) = &query.observer_id {
+        pairs.push(("observer_id", id.clone()));
+    }
+    if let Some(id) = &query.sender_id {
+        pairs.push(("sender_id", id.clone()));
+    }
+    if let Some(id) = &query.session_id {
+        pairs.push(("session_id", id.clone()));
+    }
+    client.get_json("queue/status", &pairs).await
+}
+
+pub async fn schedule_dream(client: &Honcho, dream: &ScheduleDream) -> Result<(), Error> {
+    if dream.observer.is_empty() {
+        return Err(Error::Configuration("dream observer is required".into()));
+    }
+    let body = serde_json::to_value(dream).map_err(|e| Error::Encode(e.to_string()))?;
+    client.post_json_empty("schedule_dream", &body).await
 }
 
 pub async fn search_workspace(

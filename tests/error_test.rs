@@ -124,6 +124,7 @@ fn missing_api_key_is_allowed_and_empty_key_is_not() {
     let _ws = EnvGuard::remove("HONCHO_WORKSPACE_ID");
     let missing_workspace = roncho::Honcho::builder()
         .base_url("http://localhost:9999")
+        .without_config_file()
         .build();
     assert!(matches!(
         missing_workspace,
@@ -132,12 +133,14 @@ fn missing_api_key_is_allowed_and_empty_key_is_not() {
     let no_key = roncho::Honcho::builder()
         .base_url("http://localhost:9999")
         .workspace_id("ws-1")
+        .without_config_file()
         .build();
     assert!(no_key.is_ok());
     let empty = roncho::Honcho::builder()
         .base_url("http://localhost:9999")
         .workspace_id("ws-1")
         .api_key("")
+        .without_config_file()
         .build();
     assert!(matches!(empty, Err(roncho::Error::Configuration(_))));
 }
@@ -147,6 +150,9 @@ fn missing_workspace_id_uses_default() {
     let _lock = ENV_MUTEX.lock().unwrap();
     let _ws = EnvGuard::set("HONCHO_WORKSPACE_ID", "default-ws");
     let _key = EnvGuard::set("HONCHO_API_KEY", "test-key");
-    let client = roncho::Honcho::builder().build().unwrap();
+    let client = roncho::Honcho::builder()
+        .without_config_file()
+        .build()
+        .unwrap();
     assert_eq!(client.workspace_id(), "default-ws");
 }

@@ -1,44 +1,18 @@
 use anyhow::{Context, Result};
+use roncho::config::FileConfig;
 use roncho::Honcho;
-use serde::Deserialize;
-use std::path::{Path, PathBuf};
 
 use crate::format::{self, Mode};
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct FileConfig {
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
-    pub workspace_id: Option<String>,
-}
-
-pub fn config_path() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    let config_dir = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|x| !x.is_empty())
-        .unwrap_or_else(|| format!("{home}/.config"));
-    Some(Path::new(&config_dir).join("roncho").join("roncho.toml"))
+pub fn config_path() -> Option<std::path::PathBuf> {
+    roncho::config::default_path()
 }
 
 pub fn load_file() -> Result<FileConfig> {
-    let path = match config_path() {
-        Some(p) => p,
-        None => return Ok(FileConfig::default()),
-    };
-    if !path.exists() {
-        return Ok(FileConfig::default());
-    }
-    let contents = std::fs::read_to_string(&path).with_context(|| {
-        format!(
-            "reading {} (keep your API key out of version control)",
-            path.display()
-        )
-    })?;
-    let cfg: FileConfig =
-        toml::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?;
-    Ok(cfg)
+    roncho::config::load_default()
+        .map(|cfg| cfg.unwrap_or_default())
+        .map_err(|err| anyhow::anyhow!(err))
+        .context("config file")
 }
 
 pub fn build() -> Result<Honcho> {

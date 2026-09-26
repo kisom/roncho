@@ -1,4 +1,5 @@
 use crate::api::peers as peers_api;
+use crate::api::scopes as scopes_api;
 use crate::api::sessions as sessions_api;
 use crate::api::workspace;
 use crate::client::Honcho;
@@ -130,5 +131,88 @@ impl Honcho {
     /// Create a message attributed to a peer ID.
     pub fn message(&self, content: impl Into<String>, peer_id: impl Into<String>) -> MessageCreate {
         MessageCreate::new(content, peer_id.into())
+    }
+
+    /// `POST /v3/workspaces/{workspace}/scopes`.
+    pub async fn scope(
+        &self,
+        create: &crate::models::scope::ScopeCreate,
+    ) -> Result<crate::models::scope::Scope, Error> {
+        scopes_api::get_or_create_scope(self, create).await
+    }
+
+    /// `GET /v3/workspaces/{workspace}/scopes/{id}`.
+    pub async fn get_scope(&self, scope_id: &str) -> Result<crate::models::scope::Scope, Error> {
+        scopes_api::get_scope(self, scope_id).await
+    }
+
+    /// `POST /v3/workspaces/{workspace}/scopes/list`.
+    pub async fn list_scopes(
+        &self,
+        opts: &ListOptions,
+    ) -> Result<Page<crate::models::scope::Scope>, Error> {
+        scopes_api::list_scopes(self, opts).await
+    }
+
+    /// `POST /v3/workspaces/{workspace}/scopes/{id}/sessions`.
+    pub async fn add_scope_sessions(
+        &self,
+        scope_id: &str,
+        session_ids: &[String],
+    ) -> Result<(), Error> {
+        scopes_api::add_scope_sessions(self, scope_id, session_ids).await
+    }
+
+    /// `POST /v3/workspaces/{workspace}/scopes/{id}/sessions/list`.
+    pub async fn list_scope_sessions(
+        &self,
+        scope_id: &str,
+        opts: &ListOptions,
+    ) -> Result<Page<Session>, Error> {
+        let page = scopes_api::list_scope_sessions(self, scope_id, opts).await?;
+        Ok(Page {
+            items: page
+                .items
+                .into_iter()
+                .map(|m| Session::from_model(self.clone(), m))
+                .collect(),
+            total: page.total,
+            page: page.page,
+            size: page.size,
+            pages: page.pages,
+        })
+    }
+
+    /// `DELETE /v3/workspaces/{workspace}/scopes/{id}/sessions/{session}`.
+    pub async fn remove_scope_session(
+        &self,
+        scope_id: &str,
+        session_id: &str,
+    ) -> Result<(), Error> {
+        scopes_api::remove_scope_session(self, scope_id, session_id).await
+    }
+
+    /// `GET /v3/workspaces/{workspace}/scopes/{id}/status`.
+    pub async fn scope_status(
+        &self,
+        scope_id: &str,
+    ) -> Result<std::collections::HashMap<String, crate::models::scope::ScopeBackfill>, Error> {
+        scopes_api::scope_status(self, scope_id).await
+    }
+
+    /// `GET /v3/workspaces/{workspace}/queue/status`.
+    pub async fn queue_status(
+        &self,
+        query: &crate::models::workspace::QueueStatusQuery,
+    ) -> Result<crate::models::workspace::QueueStatus, Error> {
+        workspace::queue_status(self, query).await
+    }
+
+    /// `POST /v3/workspaces/{workspace}/schedule_dream`.
+    pub async fn schedule_dream(
+        &self,
+        dream: &crate::models::scope::ScheduleDream,
+    ) -> Result<(), Error> {
+        workspace::schedule_dream(self, dream).await
     }
 }

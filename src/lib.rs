@@ -4,11 +4,13 @@ pub mod api;
 pub mod blocking;
 #[cfg(feature = "async")]
 pub mod client;
+pub mod config;
 pub mod error;
 pub mod models;
 #[cfg(feature = "async")]
 pub mod resources;
 pub(crate) mod sse;
+pub mod upload;
 
 #[cfg(feature = "async")]
 pub use client::Honcho;
@@ -38,11 +40,13 @@ pub use models::context::{AnthropicMessage, OpenAIMessage, PeerContext, SessionC
 pub use models::message::{Message, MessageCreate, MessageSearch};
 pub use models::page::{ListOptions, Page};
 pub use models::peer::PeerCreate;
+pub use models::scope::{DreamType, ScheduleDream, Scope, ScopeBackfill, ScopeCreate};
 pub use models::session::{SessionCreate, SessionPeerConfig};
 pub use models::workspace::{
     QueueStatus, QueueStatusQuery, Workspace, WorkspaceCreate, WorkspaceListOptions,
     WorkspaceUpdate,
 };
+pub use upload::FileUpload;
 
 // Include the resource accessor methods on Honcho
 #[cfg(feature = "async")]

@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use roncho::blocking::Client;
+use roncho::blocking::{Client, FileUpload};
 use roncho::models::chat::DialecticOptions;
 use roncho::models::conclusions::{ConclusionBatchCreate, ConclusionCreate, ConclusionQuery};
 use roncho::models::message::{MessageCreate, MessageSearch};
@@ -85,8 +85,41 @@ fn json_ok(body: &str) -> Vec<u8> {
 }
 
 #[test]
+fn from_file_fills_unset_fields_and_does_not_override() {
+    let dir = std::env::temp_dir().join(format!("roncho-cfg-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("roncho.toml");
+    std::fs::write(
+        &path,
+        "base_url = \"http://127.0.0.1:9\"\nworkspace_id = \"from-file\"\n",
+    )
+    .unwrap();
+    let client = Client::builder().from_file(&path).build().unwrap();
+    assert_eq!(client.workspace_id(), "from-file");
+
+    let overridden = Client::builder()
+        .from_file(&path)
+        .workspace_id("from-builder")
+        .build()
+        .unwrap();
+    assert_eq!(overridden.workspace_id(), "from-builder");
+
+    std::fs::write(
+        &path,
+        "base_url = \"http://127.0.0.1:9\"\nworkspace_id = \"from-file\"\napi_key = \"\"\n",
+    )
+    .unwrap();
+    let empty = Client::builder().from_file(&path).build();
+    assert!(empty.is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn builder_requires_base_url_and_workspace_and_rejects_https() {
-    let missing = Client::builder().workspace_id("box").build();
+    let missing = Client::builder()
+        .workspace_id("box")
+        .without_config_file()
+        .build();
     assert!(missing.is_err());
     let https = Client::builder()
         .base_url("https://127.0.0.1:9")
@@ -628,368 +661,110 @@ fn chat_stream_rejects_plain_json_and_rejoins_utf8() {
     assert_eq!(text, "caf\u{e9}");
 }
 
+#[test]
+fn scopes_upload_and_dream_send_the_documented_requests() {
+    let scope = r#"{"id":"therapy","created_at":"2024-01-01T00:00:00Z","metadata":{}}"#;
+    let (port, rx) = serve(json_ok(scope));
+    let created = client_at(port)
+        .scope(&roncho::ScopeCreate::new("therapy"))
+        .unwrap();
+    assert_eq!(created.id, "therapy");
+    let raw = request_text(rx);
+    assert!(raw.contains("POST /v3/workspaces/box/scopes "));
+    assert!(raw.contains(r#""id":"therapy""#));
+
+    let bad = client_at(port).scope(&roncho::ScopeCreate::new("has space"));
+    assert!(bad.is_err());
+
+    let (port, rx) = serve(json_ok(scope));
+    client_at(port).get_scope("therapy").unwrap();
+    assert!(request_text(rx).starts_with("GET /v3/workspaces/box/scopes/therapy "));
+
+    let page = r#"{"items":[],"total":0,"page":1,"size":50,"pages":0}"#;
+    let (port, _) = serve(
+        b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+    );
+    let too_many: Vec<String> = (0..101).map(|n| format!("s{n}")).collect();
+    assert!(client_at(port)
+        .add_scope_sessions("therapy", &too_many)
+        .is_err());
+
+    let (port, rx) = serve(
+        b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+    );
+    client_at(port)
+        .add_scope_sessions("therapy", &["s".into()])
+        .unwrap();
+    assert!(request_text(rx).contains(r#""session_ids":["s"]"#));
+
+    let (port, rx) = serve(json_ok(page));
+    client_at(port)
+        .list_scope_sessions("therapy", &ListOptions::default())
+        .unwrap();
+    assert!(request_text(rx).contains("POST /v3/workspaces/box/scopes/therapy/sessions/list "));
+
+    let status = r#"{"s":{"state":"pending","updated_at":"2024-01-01T00:00:00Z"}}"#;
+    let (port, rx) = serve(json_ok(status));
+    let rows = client_at(port).scope_status("therapy").unwrap();
+    assert_eq!(rows["s"].state, "pending");
+    assert!(request_text(rx).starts_with("GET /v3/workspaces/box/scopes/therapy/status "));
+
+    let messages = r#"[{"id":"m","content":"hello","peer_id":"p","session_id":"s","created_at":"2024-01-01T00:00:00Z","metadata":{}}]"#;
+    let (port, rx) = serve(json_ok(messages));
+    let uploaded = client_at(port)
+        .upload_file(
+            "s",
+            &FileUpload {
+                peer_id: "p",
+                filename: "note.txt",
+                bytes: b"hello",
+                content_type: None,
+                metadata: None,
+                configuration: None,
+                created_at: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(uploaded[0].content, "hello");
+    let raw = request_text(rx);
+    assert!(raw.contains("POST /v3/workspaces/box/sessions/s/messages/upload "));
+    assert!(raw.contains("multipart/form-data"));
+    assert!(raw.contains("name=\"peer_id\""));
+    assert!(raw.contains("filename=\"note.txt\""));
+    assert!(raw.contains("text/plain"));
+    assert!(client_at(port)
+        .upload_file(
+            "s",
+            &FileUpload {
+                peer_id: "p",
+                filename: "pic.jpg",
+                bytes: b"nope",
+                content_type: Some("image/jpeg"),
+                metadata: None,
+                configuration: None,
+                created_at: None,
+            },
+        )
+        .is_err());
+
+    let (port, rx) = serve(
+        b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+    );
+    client_at(port)
+        .schedule_dream(&roncho::ScheduleDream::new(
+            "owner",
+            roncho::DreamType::Omni,
+        ))
+        .unwrap();
+    let raw = request_text(rx);
+    assert!(raw.contains("POST /v3/workspaces/box/schedule_dream "));
+    assert!(raw.contains(r#""observer":"owner""#));
+    assert!(raw.contains(r#""dream_type":"omni""#));
+}
+
 fn chunk_bytes(data: &[u8]) -> Vec<u8> {
     let mut out = format!("{:x}\r\n", data.len()).into_bytes();
     out.extend_from_slice(data);
     out.extend_from_slice(b"\r\n");
     out
-}
-
-/// Live checks against `RONCHO_LIVE_URL`. Ignored unless run by name.
-/// Writes only to a throwaway workspace and deletes it.
-#[test]
-#[ignore]
-fn live_server_throwaway_workspace() {
-    let base = std::env::var("RONCHO_LIVE_URL")
-        .expect("set RONCHO_LIVE_URL to the server this suite should call");
-    let workspace = format!("roncho-test-{}", std::process::id());
-    let mut builder = Client::builder()
-        .base_url(&base)
-        .workspace_id(&workspace)
-        .connect_timeout(Duration::from_secs(5))
-        .read_timeout(Duration::from_secs(90));
-    if let Ok(key) = std::env::var("RONCHO_LIVE_KEY") {
-        if !key.is_empty() {
-            builder = builder.api_key(key);
-        }
-    }
-    let client = builder.build().unwrap();
-    match Client::builder()
-        .base_url(&base)
-        .workspace_id(&workspace)
-        .api_key("roncho-refused-key")
-        .connect_timeout(Duration::from_secs(5))
-        .read_timeout(Duration::from_secs(15))
-        .build()
-        .unwrap()
-        .probe()
-    {
-        Err(roncho::blocking::Error::Unauthorized { status }) => {
-            println!("REFUSED_KEY {status}");
-        }
-        Ok(probe) => println!(
-            "REFUSED_KEY accepted status={} (authentication still off)",
-            probe.status
-        ),
-        Err(err) => panic!("refused key returned {err}"),
-    }
-    struct Cleanup(Client);
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            let id = self.0.workspace_id().to_string();
-            let _ = self.0.delete_session("quiet-s");
-            let _ = self.0.delete_session("s");
-            let _ = self.0.delete_workspace(&id);
-        }
-    }
-    let _cleanup = Cleanup(client.clone());
-
-    let probe = client.probe().expect("health");
-    println!("PROBE {} {}", probe.status, probe.body);
-
-    let ws = client
-        .get_or_create_workspace(&WorkspaceCreate::new(&workspace))
-        .expect("workspace");
-    println!("WORKSPACE {}", ws.id);
-
-    let peer = client.peer(&PeerCreate::new("owner")).expect("peer");
-    println!("PEER {}", peer.id);
-
-    let session = client
-        .session(
-            &SessionCreate::new("s").with_peers(
-                [(
-                    "owner".into(),
-                    roncho::SessionPeerConfig {
-                        observe_me: Some(true),
-                        observe_others: Some(false),
-                    },
-                )]
-                .into_iter()
-                .collect(),
-            ),
-        )
-        .expect("session");
-    println!("SESSION {} active={}", session.id, session.is_active);
-
-    let conflict = client.delete_workspace(&workspace).expect_err("409");
-    println!("DELETE_WS_WHILE_ACTIVE {conflict:?}");
-
-    let messages = client
-        .add_messages(
-            "s",
-            &[MessageCreate::new("hello ping", "owner").with_created_at("2024-01-01T00:00:00Z")],
-        )
-        .expect("messages");
-    println!("MESSAGE {}", messages[0].id);
-
-    let page = client
-        .list_messages("s", &ListOptions::default().page(1).size(10), None)
-        .expect("list");
-    println!("LIST {} items", page.items.len());
-
-    let mut search = MessageSearch::new("hello");
-    search.limit = Some(5);
-    let found = client.search_workspace(&search).expect("search");
-    println!("SEARCH {}", found.len());
-    let peer_hits = client.search_peer("owner", &search).expect("peer search");
-    println!("PEER_SEARCH {}", peer_hits.len());
-    let session_hits = client.search_session("s", &search).expect("session search");
-    println!("SESSION_SEARCH {}", session_hits.len());
-
-    let batch = ConclusionBatchCreate {
-        conclusions: vec![ConclusionCreate::new("noted fact", "owner", "owner")],
-    };
-    let made = client.create_conclusions(&batch).expect("conclusion");
-    println!("CONCLUSION {}", made[0].id);
-    let mut query = ConclusionQuery::new("noted fact");
-    query.filters = Some(
-        serde_json::json!({"observer_id": "owner", "observed_id": "owner"})
-            .as_object()
-            .cloned()
-            .unwrap(),
-    );
-    let queried = client.query_conclusions(&query).expect("query");
-    println!("QUERY {}", queried.len());
-    client
-        .delete_conclusion(&made[0].id)
-        .expect("delete conclusion");
-
-    let answer = client
-        .peer_chat(
-            "owner",
-            &DialecticOptions {
-                query: "What did the owner just say?".into(),
-                session_id: Some("s".into()),
-                reasoning_level: Some(roncho::ReasoningLevel::Minimal),
-                ..DialecticOptions::default()
-            },
-        )
-        .expect("chat");
-    println!("CHAT {}", answer.content());
-
-    let workspace_answer = client
-        .workspace_chat(&DialecticOptions {
-            query: "What did the owner just say?".into(),
-            session_id: Some("s".into()),
-            reasoning_level: Some(roncho::ReasoningLevel::Minimal),
-            ..DialecticOptions::default()
-        })
-        .expect("workspace chat");
-    println!("WORKSPACE_CHAT {}", workspace_answer.content());
-
-    let evidenced = client
-        .peer_chat(
-            "owner",
-            &DialecticOptions {
-                query: "What did the owner just say?".into(),
-                session_id: Some("s".into()),
-                reasoning_level: Some(roncho::ReasoningLevel::Minimal),
-                include_evidence: Some(true),
-                ..DialecticOptions::default()
-            },
-        )
-        .expect("evidence");
-    println!(
-        "EVIDENCE present={} messages={}",
-        evidenced.evidence.is_some(),
-        evidenced
-            .evidence
-            .as_ref()
-            .map(|item| item.messages.len())
-            .unwrap_or(0)
-    );
-
-    let streamed: String = client
-        .peer_chat_stream(
-            "owner",
-            &DialecticOptions {
-                query: "Reply with the word ping.".into(),
-                session_id: Some("s".into()),
-                reasoning_level: Some(roncho::ReasoningLevel::Minimal),
-                ..DialecticOptions::default()
-            },
-        )
-        .expect("stream")
-        .map(|item| item.expect("stream item"))
-        .map(|chunk| chunk.content)
-        .collect();
-    println!("STREAM {streamed}");
-
-    let queue = client
-        .queue_status(&roncho::QueueStatusQuery::new().session_id("s"))
-        .expect("queue");
-    println!(
-        "QUEUE pending={} in_progress={} completed={} total={}",
-        queue.pending_work_units,
-        queue.in_progress_work_units,
-        queue.completed_work_units,
-        queue.total_work_units
-    );
-
-    for sample in 0..3 {
-        let token = format!("roncho-fact-{sample}-{}", std::process::id());
-        let started = std::time::Instant::now();
-        client
-            .add_messages(
-                "s",
-                &[MessageCreate::new(
-                    format!("Remember this exact token {token}"),
-                    "owner",
-                )],
-            )
-            .expect("timed message");
-        let mut elapsed = None;
-        while started.elapsed() < Duration::from_secs(75) {
-            let mut timed = ConclusionQuery::new(&token);
-            timed.filters = Some(
-                serde_json::json!({"observer_id": "owner", "observed_id": "owner"})
-                    .as_object()
-                    .cloned()
-                    .unwrap(),
-            );
-            let rows = client.query_conclusions(&timed).unwrap_or_default();
-            if rows.iter().any(|row| row.content.contains(&token)) {
-                elapsed = Some(started.elapsed());
-                break;
-            }
-            thread::sleep(Duration::from_secs(5));
-        }
-        let status = client
-            .queue_status(&roncho::QueueStatusQuery::new().session_id("s"))
-            .expect("queue during timing");
-        println!(
-            "TIMING sample={sample} elapsed={elapsed:?} pending={} completed={}",
-            status.pending_work_units, status.completed_work_units
-        );
-    }
-
-    client
-        .peer(
-            &PeerCreate::new("quiet").with_configuration(
-                serde_json::json!({"observe_me": false})
-                    .as_object()
-                    .cloned()
-                    .unwrap(),
-            ),
-        )
-        .expect("quiet peer");
-    client
-        .session(
-            &SessionCreate::new("quiet-s").with_peers(
-                [(
-                    "quiet".into(),
-                    roncho::SessionPeerConfig {
-                        observe_me: Some(false),
-                        observe_others: Some(false),
-                    },
-                )]
-                .into_iter()
-                .collect(),
-            ),
-        )
-        .expect("quiet session");
-    let quiet_token = format!("roncho-quiet-{}", std::process::id());
-    let before = client
-        .queue_status(&roncho::QueueStatusQuery::new().session_id("quiet-s"))
-        .expect("quiet queue before");
-    client
-        .add_messages(
-            "quiet-s",
-            &[MessageCreate::new(
-                format!("Do not derive {quiet_token}"),
-                "quiet",
-            )],
-        )
-        .expect("quiet message");
-    thread::sleep(Duration::from_secs(20));
-    let after = client
-        .queue_status(&roncho::QueueStatusQuery::new().session_id("quiet-s"))
-        .expect("quiet queue after");
-    let mut quiet_query = ConclusionQuery::new(&quiet_token);
-    quiet_query.filters = Some(
-        serde_json::json!({"observer": "quiet", "observed": "quiet"})
-            .as_object()
-            .cloned()
-            .unwrap(),
-    );
-    let quiet_rows = client.query_conclusions(&quiet_query).unwrap_or_default();
-    println!(
-        "OBSERVE_ME_FALSE before_pending={} after_pending={} conclusions={}",
-        before.pending_work_units,
-        after.pending_work_units,
-        quiet_rows.len()
-    );
-
-    let noreason_id = format!("{workspace}-noreason");
-    let mut noreason_builder = Client::builder()
-        .base_url(&base)
-        .workspace_id(&noreason_id)
-        .connect_timeout(Duration::from_secs(5))
-        .read_timeout(Duration::from_secs(30));
-    if let Ok(key) = std::env::var("RONCHO_LIVE_KEY") {
-        if !key.is_empty() {
-            noreason_builder = noreason_builder.api_key(key);
-        }
-    }
-    let noreason = noreason_builder.build().unwrap();
-    noreason
-        .get_or_create_workspace(
-            &WorkspaceCreate::new(&noreason_id).with_configuration(
-                serde_json::json!({"reasoning": {"enabled": false}})
-                    .as_object()
-                    .cloned()
-                    .unwrap(),
-            ),
-        )
-        .expect("noreason workspace");
-    noreason
-        .peer(&PeerCreate::new("owner"))
-        .expect("noreason peer");
-    noreason
-        .session(
-            &SessionCreate::new("s").with_peers(
-                [(
-                    "owner".into(),
-                    roncho::SessionPeerConfig {
-                        observe_me: Some(true),
-                        observe_others: Some(false),
-                    },
-                )]
-                .into_iter()
-                .collect(),
-            ),
-        )
-        .expect("noreason session");
-    let off_token = format!("roncho-off-{}", std::process::id());
-    noreason
-        .add_messages(
-            "s",
-            &[MessageCreate::new(
-                format!("Reasoning is off {off_token}"),
-                "owner",
-            )],
-        )
-        .expect("noreason message");
-    thread::sleep(Duration::from_secs(20));
-    let off_queue = noreason
-        .queue_status(&roncho::QueueStatusQuery::new().session_id("s"))
-        .expect("noreason queue");
-    println!(
-        "REASONING_OFF pending={} completed={} total={}",
-        off_queue.pending_work_units, off_queue.completed_work_units, off_queue.total_work_units
-    );
-    let _ = noreason.delete_session("s");
-    noreason
-        .delete_workspace(&noreason_id)
-        .expect("delete noreason workspace");
-
-    client
-        .delete_session("quiet-s")
-        .expect("delete quiet session");
-    client.delete_session("s").expect("delete session");
-    client
-        .delete_workspace(&workspace)
-        .expect("delete workspace");
-    println!("CLEANED {workspace}");
 }
