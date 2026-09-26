@@ -5,11 +5,12 @@ use crate::client::Honcho;
 use crate::error::Error;
 use crate::models::message::MessageCreate;
 use crate::models::page::{ListOptions, Page};
-use crate::models::peer::{PeerCreate};
-use crate::models::session::{SessionCreate};
+use crate::models::peer::PeerCreate;
+use crate::models::session::SessionCreate;
 use crate::resources::conclusions::Conclusions;
 use crate::resources::peer::Peer;
 use crate::resources::session::Session;
+use crate::resources::workspace::Workspaces;
 
 impl Honcho {
     /// Get or create a peer by ID. If the peer doesn't exist, it's created.
@@ -34,7 +35,10 @@ impl Honcho {
     }
 
     /// List all peers in this workspace.
-    pub async fn peers(&self, opts: &ListOptions) -> Result<Page<crate::models::peer::Peer>, Error> {
+    pub async fn peers(
+        &self,
+        opts: &ListOptions,
+    ) -> Result<Page<crate::models::peer::Peer>, Error> {
         peers_api::list_peers(self, opts).await
     }
 
@@ -58,9 +62,14 @@ impl Honcho {
 
     /// List all sessions in this workspace.
     pub async fn sessions(&self, opts: &ListOptions) -> Result<Page<Session>, Error> {
-        let page: Page<crate::models::session::Session> = sessions_api::list_sessions(self, opts).await?;
+        let page: Page<crate::models::session::Session> =
+            sessions_api::list_sessions(self, opts).await?;
         Ok(Page {
-            items: page.items.into_iter().map(|m| Session::from_model(self.clone(), m)).collect(),
+            items: page
+                .items
+                .into_iter()
+                .map(|m| Session::from_model(self.clone(), m))
+                .collect(),
             total: page.total,
             page: page.page,
             size: page.size,
@@ -71,6 +80,11 @@ impl Honcho {
     /// Access the workspace-level Conclusions API.
     pub fn conclusions(&self) -> Conclusions {
         Conclusions::new(self.clone())
+    }
+
+    /// Access the Workspaces API for listing, updating, and deleting workspaces.
+    pub fn workspaces(&self) -> Workspaces {
+        Workspaces::new(self.clone())
     }
 
     /// Search across all content in the workspace.
@@ -97,18 +111,16 @@ impl Honcho {
         &self,
         query: impl Into<String>,
         opts: Option<crate::models::chat::DialecticOptions>,
-    ) -> std::pin::Pin<Box<dyn futures::Stream<Item = Result<crate::models::chat::StreamChunk, Error>> + Send>> {
+    ) -> std::pin::Pin<
+        Box<dyn futures::Stream<Item = Result<crate::models::chat::StreamChunk, Error>> + Send>,
+    > {
         let mut opts = opts.unwrap_or_default();
         opts.query = query.into();
         workspace::chat_workspace_stream(self.clone(), opts)
     }
 
     /// Create a message attributed to a peer ID.
-    pub fn message(
-        &self,
-        content: impl Into<String>,
-        peer_id: impl Into<String>,
-    ) -> MessageCreate {
+    pub fn message(&self, content: impl Into<String>, peer_id: impl Into<String>) -> MessageCreate {
         MessageCreate::new(content, peer_id.into())
     }
 }

@@ -5,15 +5,122 @@ use futures::Stream;
 use serde_json::json;
 
 use crate::client::Honcho;
-use crate::error::Error;
+use crate::error::{parse_api_error, Error};
 use crate::models::chat::{ChatResponse, DialecticOptions, ReasoningLevel, StreamChunk};
 use crate::models::message::Message;
-use crate::models::page::Page;
+use crate::models::page::{ListOptions, Page};
+use crate::models::workspace::{Workspace, WorkspaceCreate, WorkspaceListOptions, WorkspaceUpdate};
 
-pub async fn search_workspace(
+/// Build a URL rooted at `/v3/workspaces` (not scoped to a workspace).
+///
+/// The Workspaces API endpoints are not workspace-scoped: the workspace is
+/// resolved from the JWT rather than a `{ws}` path segment, so requests target
+/// `/v3/workspaces`, `/v3/workspaces/list`, and `/v3/workspaces/{id}`.
+fn root_url(client: &Honcho, path: &str) -> Result<url::Url, Error> {
+    let full_path = if path.is_empty() {
+        "/v3/workspaces".to_string()
+    } else {
+        format!("/v3/workspaces/{}", path)
+    };
+    client
+        .base_url()
+        .join(&full_path)
+        .map_err(|e| Error::InvalidUrl(e.to_string()))
+}
+
+/// Send a JSON request against a root-scoped Workspaces API path.
+async fn request_json<T: serde::de::DeserializeOwned>(
     client: &Honcho,
-    query: &str,
-) -> Result<Page<Message>, Error> {
+    path: &str,
+    method: reqwest::Method,
+    query: Option<&[(&str, String)]>,
+    body: Option<&serde_json::Value>,
+) -> Result<T, Error> {
+    let url = root_url(client, path)?;
+    let headers = client.headers()?;
+
+    let mut req = client.http.request(method, url).headers(headers);
+    if let Some(body) = body {
+        req = req.json(body);
+    }
+    if let Some(query) = query {
+        req = req.query(query);
+    }
+
+    let resp = req.timeout(client.timeout).send().await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(parse_api_error(status, &text));
+    }
+
+    let bytes = resp.bytes().await?;
+    if bytes.is_empty() {
+        // 204 No Content (e.g. delete) — decode as an empty object so callers
+        // can ignore the response body.
+        return serde_json::from_str::<T>("{}").map_err(|e| Error::Decode(e.to_string()));
+    }
+
+    serde_json::from_slice::<T>(&bytes).map_err(|e| Error::Decode(e.to_string()))
+}
+
+pub async fn get_or_create_workspace(
+    client: &Honcho,
+    create: &WorkspaceCreate,
+) -> Result<Workspace, Error> {
+    let body = serde_json::to_value(create).map_err(|e| Error::Encode(e.to_string()))?;
+    request_json(client, "", reqwest::Method::POST, None, Some(&body)).await
+}
+
+pub async fn list_workspaces(
+    client: &Honcho,
+    opts: &WorkspaceListOptions,
+) -> Result<Page<Workspace>, Error> {
+    let list_opts = ListOptions {
+        page: opts.page,
+        size: opts.size,
+        reverse: opts.reverse,
+    };
+    let query = client.list_query_params(&list_opts);
+    let body = serde_json::json!({});
+    request_json(
+        client,
+        "list",
+        reqwest::Method::POST,
+        Some(&query),
+        Some(&body),
+    )
+    .await
+}
+
+pub async fn get_workspace(client: &Honcho, workspace_id: &str) -> Result<Workspace, Error> {
+    request_json(client, workspace_id, reqwest::Method::GET, None, None).await
+}
+
+pub async fn update_workspace(
+    client: &Honcho,
+    workspace_id: &str,
+    update: &WorkspaceUpdate,
+) -> Result<Workspace, Error> {
+    let body = serde_json::to_value(update).map_err(|e| Error::Encode(e.to_string()))?;
+    request_json(
+        client,
+        workspace_id,
+        reqwest::Method::PUT,
+        None,
+        Some(&body),
+    )
+    .await
+}
+
+pub async fn delete_workspace(client: &Honcho, workspace_id: &str) -> Result<(), Error> {
+    request_json::<serde_json::Value>(client, workspace_id, reqwest::Method::DELETE, None, None)
+        .await?;
+    Ok(())
+}
+
+pub async fn search_workspace(client: &Honcho, query: &str) -> Result<Page<Message>, Error> {
     let body = json!({ "query": query });
     client.post_json("search", &body).await
 }
@@ -132,7 +239,7 @@ pub fn chat_workspace_stream(
                 }
 
                 let parts: Vec<&str> = line.splitn(2, ": ").collect();
-                let field = parts.get(0).copied().unwrap_or("");
+                let field = parts.first().copied().unwrap_or("");
                 let value = parts.get(1).copied().unwrap_or("").trim_start();
 
                 match field {

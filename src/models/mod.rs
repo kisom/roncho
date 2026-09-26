@@ -5,6 +5,7 @@ pub mod message;
 pub mod page;
 pub mod peer;
 pub mod session;
+pub mod workspace;
 
 pub use chat::{ChatResponse, DialecticOptions, Evidence, ReasoningLevel, StreamChunk};
 pub use conclusions::{
@@ -16,3 +17,4 @@ pub use message::{Message, MessageCreate};
 pub use page::Page;
 pub use peer::{Peer, PeerCreate};
 pub use session::{Session, SessionCreate, SessionPeerConfig};
+pub use workspace::{Workspace, WorkspaceCreate, WorkspaceListOptions, WorkspaceUpdate};
